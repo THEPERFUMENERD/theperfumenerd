@@ -3,8 +3,10 @@ import {
   ArrowLeft, ArrowRight, Check, ChevronRight, Heart, House,
   Menu, Minus, Plus, Search, ShoppingBag, SlidersHorizontal, Sparkles, X,
 } from 'lucide-react';
-import { getFragranceCategories, money, type Fragrance } from './catalog';
-import { auth, authPersistence, db, isFirebaseConfigured } from './firebase';
+import { getFragranceCategories, money, optimizedProductImage, type Fragrance } from './catalog';
+import { auth, authPersistence, db, functions, isFirebaseConfigured } from './firebase';
+import { LoadedImage } from './LoadedImage';
+import { applyStorefrontDiscounts } from './discounts';
 import {
   createUserWithEmailAndPassword,
   GoogleAuthProvider,
@@ -17,19 +19,23 @@ import {
   updateProfile,
   type User,
 } from 'firebase/auth';
-import { addDoc, collection, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { useStorefrontData, type StorefrontSettings } from './storefront-data';
+import { addDoc, collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import { defaultCollectionHeroSettings, defaultCollectionSettings, defaultFinderSettings, defaultHeroSettings, useStorefrontData, type StorefrontSettings } from './storefront-data';
 const AdminPortal = lazy(() => import('./admin'));
 const PosTerminal = lazy(() => import('./pos').then((module) => ({ default: module.PosTerminal })));
 const PosCustomerDisplay = lazy(() => import('./pos').then((module) => ({ default: module.PosCustomerDisplay })));
 
-type Tab = 'Home' | 'Search' | 'Wishlist' | 'Account' | 'Cart';
+type Tab = 'Home' | 'Search' | 'Wishlist' | 'Account' | 'Cart' | 'Orders';
 type AdminView = 'dashboard' | 'pos' | 'customer-display' | null;
 type CartLine = { id: string; quantity: number };
 type Panel = 'menu' | 'detail' | 'filters' | 'finder' | 'checkout' | 'feedback' | null;
 type FinderAnswers = { category: string; family: string; occasion: string; budget: string; strength: string };
 const adminEmailAllowlist = new Set(['perfumenerd6@gmail.com']);
 const tabNames: Tab[] = ['Home', 'Search', 'Wishlist', 'Account', 'Cart'];
+const getStorefrontTab = (pathname: string): Tab => pathname === '/orders'
+  ? 'Orders'
+  : tabNames.find((item) => item.toLowerCase() === pathname.split('/')[1]) ?? 'Home';
 const getAdminView = (pathname: string): AdminView => pathname === '/admin'
   ? 'dashboard'
   : pathname === '/admin/pos'
@@ -50,8 +56,7 @@ function App() {
   const [adminView, setAdminView] = useState<AdminView>(() => getAdminView(location.pathname));
   const isAdminRoute = adminView !== null;
   const [tab, setTab] = useState<Tab>(() => {
-    const path = location.pathname.split('/')[1];
-    return tabNames.find((item) => item.toLowerCase() === path) ?? 'Home';
+    return getStorefrontTab(location.pathname);
   });
   const [cart, setCart] = useState<CartLine[]>(() => readStored('tpn-cart', []));
   const [wishlist, setWishlist] = useState<string[]>(() => readStored('tpn-wishlist', []));
@@ -66,6 +71,7 @@ function App() {
   });
   const [toast, setToast] = useState('');
   const [checkoutError, setCheckoutError] = useState('');
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState('');
@@ -79,15 +85,23 @@ function App() {
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [feedbackError, setFeedbackError] = useState('');
   const [verificationReturn, setVerificationReturn] = useState(false);
-  const { products, settings, isLoading: storefrontLoading, error: storefrontError, isDemo } = useStorefrontData();
+  const { products, settings, isLoading: storefrontLoading, settingsLoading, error: storefrontError, isDemo } = useStorefrontData();
   const [finderStep, setFinderStep] = useState(0);
   const [answers, setAnswers] = useState<FinderAnswers>({ category: '', family: '', occasion: '', budget: '', strength: '' });
-  const [checkoutForm, setCheckoutForm] = useState({ name: '', email: '', phone: '', address: '', city: '', region: '' });
+  const [checkoutForm, setCheckoutForm] = useState({ name: '', email: '', phone: '', address: '', city: '', region: '', postalCode: '' });
 
+  const storefrontProducts = useMemo(
+    () => applyStorefrontDiscounts(products, settings, settingsLoading),
+    [products, settings, settingsLoading],
+  );
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
   const cartTotal = cart.reduce((total, item) => {
-    const product = products.find((entry) => entry.id === item.id);
+    const product = storefrontProducts.find((entry) => entry.id === item.id);
     return total + (product?.price ?? 0) * item.quantity;
+  }, 0);
+  const cartSavings = cart.reduce((total, item) => {
+    const product = storefrontProducts.find((entry) => entry.id === item.id);
+    return total + ((product?.originalPrice ?? product?.price ?? 0) - (product?.price ?? 0)) * item.quantity;
   }, 0);
 
   useEffect(() => { localStorage.setItem('tpn-cart', JSON.stringify(cart)); }, [cart]);
@@ -162,8 +176,7 @@ function App() {
   useEffect(() => {
     const onPopState = () => {
       setAdminView(getAdminView(location.pathname));
-      const path = location.pathname.split('/')[1];
-      setTab(tabNames.find((item) => item.toLowerCase() === path) ?? 'Home');
+      setTab(getStorefrontTab(location.pathname));
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -196,7 +209,7 @@ function App() {
 
   const filteredProducts = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    const results = products.filter((product) => {
+    const results = storefrontProducts.filter((product) => {
       const matchesQuery = !normalized || [
         product.name, product.brand, product.family, ...getFragranceCategories(product), product.concentration,
         ...product.notes, ...product.occasion,
@@ -216,9 +229,9 @@ function App() {
     if (sort === 'Best sellers') results.sort((a, b) => Number(b.badge === 'BEST SELLER') - Number(a.badge === 'BEST SELLER'));
     if (sort === 'Newest arrivals') results.sort((a, b) => Number(b.badge === 'NEW ARRIVAL') - Number(a.badge === 'NEW ARRIVAL'));
     return results;
-  }, [category, filters, query, sort]);
+  }, [category, filters, query, sort, storefrontProducts]);
 
-  const recommendations = useMemo(() => products.filter((product) => {
+  const recommendations = useMemo(() => storefrontProducts.filter((product) => {
     const categoryMatch = !answers.category || getFragranceCategories(product).some((item) => item === answers.category);
     const familyMatch = !answers.family || product.family.toLowerCase().includes(answers.family.toLowerCase()) ||
       product.notes.some((note) => note.toLowerCase().includes(answers.family.toLowerCase()));
@@ -226,7 +239,7 @@ function App() {
     const strengthMatch = !answers.strength || product.strength === answers.strength;
     const budget = answers.budget ? Number(answers.budget) : Infinity;
     return categoryMatch && familyMatch && occasionMatch && strengthMatch && product.price <= budget;
-  }), [answers]);
+  }), [answers, storefrontProducts]);
 
   const navigate = useCallback((next: Tab) => {
     setAdminView(null);
@@ -236,6 +249,7 @@ function App() {
     setPanel(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
+  const clearCartAfterPayment = useCallback(() => setCart([]), []);
   const navigateAdmin = useCallback(() => {
     setAdminView('dashboard');
     history.pushState({ admin: true }, '', '/admin');
@@ -313,22 +327,36 @@ function App() {
   const startCheckout = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setCheckoutError('');
+    if (!functions || cart.length === 0) {
+      setCheckoutError('Secure checkout is unavailable. Check your connection and try again.');
+      return;
+    }
+    setCheckoutBusy(true);
     try {
-      const response = await fetch('/api/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customer: checkoutForm, items: cart.map(({ id, quantity }) => ({ productId: id, quantity })) }),
+      const startPaystackCheckout = httpsCallable<
+        { customer: typeof checkoutForm; items: { productId: string; quantity: number }[] },
+        { authorizationUrl: string; orderId: string; amountMinor: number }
+      >(functions, 'initializePaystackOrder');
+      const result = await startPaystackCheckout({
+        customer: checkoutForm,
+        items: cart.map(({ id, quantity }) => ({ productId: id, quantity })),
       });
-      if (!response.ok) throw new Error('Secure checkout is not configured for this store yet. Your cart is saved.');
-      const result = await response.json() as { authorizationUrl?: string };
-      if (!result.authorizationUrl) throw new Error('The payment service did not return a checkout link.');
-      window.location.assign(result.authorizationUrl);
+      if (!result.data.authorizationUrl || !result.data.orderId) {
+        throw new Error('The payment service did not return a checkout link.');
+      }
+      sessionStorage.setItem('tpn-pending-checkout', JSON.stringify({
+        orderId: result.data.orderId,
+        email: checkoutForm.email.trim().toLowerCase(),
+      }));
+      window.location.assign(result.data.authorizationUrl);
     } catch (error) {
+      console.error('Could not initialize secure Paystack checkout.', error);
       setCheckoutError(error instanceof Error ? error.message : 'Unable to start secure checkout.');
+      setCheckoutBusy(false);
     }
   };
 
-  const card = (product: Fragrance) => <ProductCard key={product.id} product={product}
+  const card = (product: Fragrance, priority = false) => <ProductCard key={product.id} product={product} priority={priority}
     saved={wishlist.includes(product.id)} onOpen={() => openProduct(product)}
     onSave={() => toggleWishlist(product.id)} onAdd={() => addToCart(product)} />;
   const setAnswer = (key: keyof FinderAnswers, value: string) => setAnswers((current) => ({ ...current, [key]: value }));
@@ -349,12 +377,12 @@ function App() {
       </header>}
 
       <main className="page-content">
-        {!isAdminRoute && tab === 'Home' && <HomePage products={products} settings={settings} storefrontError={storefrontError} onNavigate={navigate} onNotice={() => { setFeedbackError(''); setPanel('feedback'); }}
+        {!isAdminRoute && tab === 'Home' && <HomePage products={storefrontProducts} settings={settings} storefrontError={storefrontError} onNavigate={navigate} onNotice={() => { setFeedbackError(''); setPanel('feedback'); }}
           onCategory={(value) => { setCategory(value); navigate('Search'); }} onFinder={() => { resetFinder(); setPanel('finder'); }} card={card} />}
         {!isAdminRoute && tab === 'Search' && <section className="content-page search-page">
           <div className="collection-hero">
-            <div className="collection-hero-copy"><div className="eyebrow">THE PERFUME NERD · FRAGRANCE HOUSE</div><h1>Find the scent that feels like you.</h1><p>Explore a considered edit of fragrances for every mood, moment and side of you.</p>            <div className="collection-meta"><span>{storefrontLoading ? 'A curated collection' : `${products.length} curated fragrances`}</span><i /><span>Accra, Ghana</span></div></div>
-            <div className="collection-hero-image"><img src={products[0]?.image || 'https://images.unsplash.com/photo-1594035910387-fea47794261f?auto=format&fit=crop&w=900&q=85'} alt="" /><span>THE SIGNATURE EDIT</span></div>
+            <div className="collection-hero-copy"><div className="eyebrow">{settings.collectionHeroEyebrow || defaultCollectionHeroSettings.eyebrow}</div><h1>{settings.collectionHeroTitle || defaultCollectionHeroSettings.title}</h1><p>{settings.collectionHeroText || defaultCollectionHeroSettings.text}</p><div className="collection-meta"><span>{storefrontLoading ? 'A curated collection' : `${products.length} curated fragrances`}</span><i /><span>Accra, Ghana</span></div></div>
+            <div className="collection-hero-image">{(settings.collectionHeroImage || products[0]?.image || defaultCollectionHeroSettings.image) && <LoadedImage key={settings.collectionHeroImage || products[0]?.image || defaultCollectionHeroSettings.image} className="" src={settings.collectionHeroImage || products[0]?.image || defaultCollectionHeroSettings.image} alt="" />}<span>{settings.collectionHeroCaption || defaultCollectionHeroSettings.caption}</span></div>
           </div>
           <div className="collection-tools">
             <label className="search-field"><Search size={19} /><input autoFocus={window.innerWidth > 620} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search scents, notes, brands..." aria-label="Search fragrances" />
@@ -367,23 +395,24 @@ function App() {
           </div>
           <div className="filter-chips">{['All', 'Men', 'Women', 'Unisex'].map((item) => <button key={item} className={`chip ${category === item ? 'selected' : ''}`} onClick={() => setCategory(item)}>{item === 'All' ? 'All fragrances' : item}</button>)}</div>
           <div className="collection-results-heading"><div><span className="eyebrow">THE EDIT</span><h2>{category === 'All' ? 'Every fragrance' : `${category} fragrances`}</h2></div><p className="result-count">{storefrontLoading ? 'Loading the edit' : `${filteredProducts.length} ${filteredProducts.length === 1 ? 'fragrance' : 'fragrances'}`}</p></div>
-          {filteredProducts.length ? <div className="product-grid">{filteredProducts.map(card)}</div> : storefrontLoading ? <p className="storefront-loading">Preparing your fragrance edit…</p> : <EmptyState title="No fragrances found" text="Try another search or clear your filters." action="Clear search" onAction={() => { setQuery(''); setCategory('All'); setFilters({ family: 'All families', availability: 'Any availability', brand: 'All brands', price: 'Any price', concentration: 'All concentrations', occasion: 'Any occasion' }); }} />}
+          {filteredProducts.length ? <div className="product-grid">{filteredProducts.map((product, index) => card(product, index < 4))}</div> : storefrontLoading ? <p className="storefront-loading">Preparing your fragrance edit…</p> : <EmptyState title="No fragrances found" text="Try another search or clear your filters." action="Clear search" onAction={() => { setQuery(''); setCategory('All'); setFilters({ family: 'All families', availability: 'Any availability', brand: 'All brands', price: 'Any price', concentration: 'All concentrations', occasion: 'Any occasion' }); }} />}
         </section>}
         {!isAdminRoute && tab === 'Wishlist' && <section className="content-page"><div className="eyebrow">YOUR EDIT</div><h1>Saved scents.</h1><p className="page-intro">The fragrances you’re thinking about, all in one place.</p>
-          {wishlist.length ? <div className="product-grid">{products.filter((item) => wishlist.includes(item.id)).map(card)}</div> : <EmptyState title="A little room for discovery." text="Save fragrances you love and find them here whenever you return." action="Explore the collection" onAction={() => navigate('Search')} />}</section>}
+          {wishlist.length ? <div className="product-grid">{storefrontProducts.filter((item) => wishlist.includes(item.id)).map((product, index) => card(product, index < 4))}</div> : <EmptyState title="A little room for discovery." text="Save fragrances you love and find them here whenever you return." action="Explore the collection" onAction={() => navigate('Search')} />}</section>}
         {!isAdminRoute && tab === 'Account' && <AccountPage onNavigate={navigate} user={user} loading={authLoading} authError={authError} authRevision={authRevision} onAuthUpdated={() => setAuthRevision((revision) => revision + 1)} verificationReturn={verificationReturn} onVerificationReturnHandled={acknowledgeVerificationReturn} onAdmin={navigateAdmin} isAdmin={isAdmin} />}
+        {!isAdminRoute && tab === 'Orders' && <OrderTrackingPage user={user} authLoading={authLoading} onPaymentConfirmed={clearCartAfterPayment} />}
         {!isAdminRoute && tab === 'Cart' && <section className="content-page cart-page"><div className="eyebrow">YOUR SELECTION</div><h1>Your bag<span className="heading-count"> ({cartCount})</span></h1>
           {cart.length === 0 ? <EmptyState title="Your bag is waiting." text="Discover something that feels like you." action="Explore fragrances" onAction={() => navigate('Search')} /> : <>
             <div className="cart-list">{cart.map((line) => {
-              const product = products.find((item) => item.id === line.id);
+              const product = storefrontProducts.find((item) => item.id === line.id);
               if (!product) return null;
               return <article className="cart-line" key={line.id}><button className="cart-image-button" onClick={() => openProduct(product)}><img src={product.image} alt={product.name} /></button>
-                <div className="cart-details"><span className="product-brand">{product.brand}</span><button className="cart-product-name" onClick={() => openProduct(product)}>{product.name}</button><span className="product-price">{money(product.price)}</span>
+                <div className="cart-details"><span className="product-brand">{product.brand}</span><button className="cart-product-name" onClick={() => openProduct(product)}>{product.name}</button><span className="product-price">{money(product.price)}{product.originalPrice !== undefined && <del>{money(product.originalPrice)}</del>}</span>
                   <div className="quantity-control"><button aria-label={`Decrease ${product.name} quantity`} onClick={() => updateQuantity(product.id, -1)}><Minus size={13} /></button><span>{line.quantity}</span><button aria-label={`Increase ${product.name} quantity`} onClick={() => updateQuantity(product.id, 1)}><Plus size={13} /></button></div></div>
                 <button className="remove-button" onClick={() => setCart((current) => current.filter((item) => item.id !== line.id))}>Remove</button>
               </article>;
             })}</div>
-            <div className="cart-summary"><div><span>Subtotal</span><strong>{money(cartTotal)}</strong></div><p>Delivery is calculated at checkout.</p><button className="primary-button full-button" onClick={() => { setCheckoutError(''); setPanel('checkout'); }}>Continue to checkout <ArrowRight size={16} /></button><button className="text-button centered" onClick={() => navigate('Search')}>Continue browsing</button></div>
+            <div className="cart-summary"><div><span>Subtotal</span><strong>{money(cartTotal)}</strong></div>{cartSavings > 0 && <div className="cart-sale-savings"><span>Sale savings</span><strong>−{money(cartSavings)}</strong></div>}<p>Delivery charges are not included in the online total.</p><button className="primary-button full-button" onClick={() => { setCheckoutError(''); setPanel('checkout'); }}>Continue to checkout <ArrowRight size={16} /></button><button className="text-button centered" onClick={() => navigate('Search')}>Continue browsing</button></div>
           </>}</section>}
         {adminView === 'dashboard' && <Suspense fallback={<div className="admin-guard"><p>Opening administrator workspace…</p></div>}><AdminPortal user={user} loading={authLoading} isAdmin={isAdmin} claimLoading={adminClaimLoading} claimError={adminClaimError} onPos={navigatePos} onSignIn={() => navigate('Account')} /></Suspense>}
         {adminView === 'pos' && <Suspense fallback={<div className="admin-guard"><p>Opening the point of sale…</p></div>}><PosTerminal user={user} isAdmin={isAdmin && !adminClaimLoading} onBack={navigateAdmin} /></Suspense>}
@@ -408,20 +437,20 @@ function App() {
             <img className="drawer-brand-logo" src="/IMAGES/PERFUME-NERD-LOGO.png" alt="" />
             <span className="drawer-brand-copy"><span>THE PERFUME NERD</span></span>
           </a><button className="icon-button" onClick={() => setPanel(null)} aria-label="Close menu"><X size={20} /></button></div>
-          <nav className="drawer-links">{['Home', 'Shop All', 'Men’s Fragrances', 'Women’s Fragrances', 'Unisex Fragrances', 'Best Sellers', 'Trending', 'New Arrivals'].map((item, index) =>
-            <button key={item} onClick={() => { if (index >= 2 && index <= 4) setCategory(['All', 'All', 'Men', 'Women', 'Unisex'][index]); else setCategory('All'); navigate(index === 0 ? 'Home' : 'Search'); }}><span>{item}</span><ChevronRight size={16} /></button>)}
+          <nav className="drawer-links">{['Home', 'Shop All', 'Orders', 'Best Sellers', 'Trending', 'New Arrivals'].map((item) =>
+            <button key={item} onClick={() => { setCategory('All'); navigate(item === 'Home' ? 'Home' : item === 'Orders' ? 'Orders' : 'Search'); }}><span>{item}</span><ChevronRight size={16} /></button>)}
           </nav>
           <div className="drawer-secondary">{['About us', 'Contact us', 'Help & support', 'Delivery & returns', 'Terms & privacy'].map((item) => <button key={item} onClick={() => { setPanel(null); setToast('Business contact and policy information has not been configured.'); }}>{item}</button>)}</div>
           <p className="drawer-foot">A considered collection for every version of you.</p>
         </aside>}
-        {panel === 'detail' && selected && <ProductDetail product={selected} saved={wishlist.includes(selected.id)} onSave={() => toggleWishlist(selected.id)} onAdd={() => addToCart(selected)} onClose={() => setPanel(null)} />}
+        {panel === 'detail' && selected && <ProductDetail product={storefrontProducts.find((product) => product.id === selected.id) ?? selected} saved={wishlist.includes(selected.id)} onSave={() => toggleWishlist(selected.id)} onAdd={() => addToCart(storefrontProducts.find((product) => product.id === selected.id) ?? selected)} onClose={() => setPanel(null)} />}
         {panel === 'filters' && <aside className="drawer right-drawer filter-drawer" role="dialog" aria-modal="true" aria-label="Filter fragrances">
           <div className="drawer-top"><div><div className="eyebrow">REFINE YOUR SEARCH</div><h2>Filters</h2></div><button className="icon-button" onClick={() => setPanel(null)} aria-label="Close filters"><X size={20} /></button></div>
-          <label className="form-label">Brand<select value={filters.brand} onChange={(e) => setFilters((state) => ({ ...state, brand: e.target.value }))}><option>All brands</option>{[...new Set(products.map((product) => product.brand))].map((brand) => <option key={brand}>{brand}</option>)}</select></label>
+          <label className="form-label">Brand<select value={filters.brand} onChange={(e) => setFilters((state) => ({ ...state, brand: e.target.value }))}><option>All brands</option>{[...new Set(storefrontProducts.map((product) => product.brand))].map((brand) => <option key={brand}>{brand}</option>)}</select></label>
           <label className="form-label">Maximum price<select value={filters.price} onChange={(e) => setFilters((state) => ({ ...state, price: e.target.value }))}><option>Any price</option>{['1500', '2000', '3000', '3500'].map((price) => <option key={price} value={price}>Up to {money(Number(price))}</option>)}</select></label>
-          <label className="form-label">Fragrance family<select value={filters.family} onChange={(e) => setFilters((state) => ({ ...state, family: e.target.value }))}><option>All families</option>{[...new Set(products.map((product) => product.family))].map((family) => <option key={family}>{family}</option>)}</select></label>
-          <label className="form-label">Concentration<select value={filters.concentration} onChange={(e) => setFilters((state) => ({ ...state, concentration: e.target.value }))}><option>All concentrations</option>{[...new Set(products.map((product) => product.concentration))].map((concentration) => <option key={concentration}>{concentration}</option>)}</select></label>
-          <label className="form-label">Occasion<select value={filters.occasion} onChange={(e) => setFilters((state) => ({ ...state, occasion: e.target.value }))}><option>Any occasion</option>{[...new Set(products.flatMap((product) => product.occasion))].map((occasion) => <option key={occasion}>{occasion}</option>)}</select></label>
+          <label className="form-label">Fragrance family<select value={filters.family} onChange={(e) => setFilters((state) => ({ ...state, family: e.target.value }))}><option>All families</option>{[...new Set(storefrontProducts.map((product) => product.family))].map((family) => <option key={family}>{family}</option>)}</select></label>
+          <label className="form-label">Concentration<select value={filters.concentration} onChange={(e) => setFilters((state) => ({ ...state, concentration: e.target.value }))}><option>All concentrations</option>{[...new Set(storefrontProducts.map((product) => product.concentration))].map((concentration) => <option key={concentration}>{concentration}</option>)}</select></label>
+          <label className="form-label">Occasion<select value={filters.occasion} onChange={(e) => setFilters((state) => ({ ...state, occasion: e.target.value }))}><option>Any occasion</option>{[...new Set(storefrontProducts.flatMap((product) => product.occasion))].map((occasion) => <option key={occasion}>{occasion}</option>)}</select></label>
           <label className="form-label">Availability<select value={filters.availability} onChange={(e) => setFilters((state) => ({ ...state, availability: e.target.value }))}><option>Any availability</option><option>In stock only</option></select></label>
           <div className="filter-drawer-actions"><button className="text-button" onClick={() => { setFilters({ family: 'All families', availability: 'Any availability', brand: 'All brands', price: 'Any price', concentration: 'All concentrations', occasion: 'Any occasion' }); setCategory('All'); }}>Clear all</button><button className="primary-button" onClick={() => setPanel(null)}>Show {filteredProducts.length} results</button></div>
         </aside>}
@@ -443,17 +472,17 @@ function App() {
             <div className="finder-actions"><button className="text-button" onClick={() => finderStep === 0 ? resetFinder() : setFinderStep((step) => step - 1)}>{finderStep === 0 ? 'Start over' : 'Back'}</button>
               <button className="primary-button" onClick={() => finderStep < 4 ? setFinderStep((step) => step + 1) : setFinderStep(5)}>Continue <ArrowRight size={15} /></button></div>
           </> : <div className="finder-results"><p className="page-intro">A few scents that might feel like you.</p><button className="text-button restart" onClick={resetFinder}>Start again</button>
-            {recommendations.length ? <div className="product-grid">{recommendations.map(card)}</div> : <EmptyState title="A rare combination." text="Try changing a preference to see more of the collection." action="Edit preferences" onAction={() => setFinderStep(0)} />}</div>}
+            {recommendations.length ? <div className="product-grid">{recommendations.map((product, index) => card(product, index < 4))}</div> : <EmptyState title="A rare combination." text="Try changing a preference to see more of the collection." action="Edit preferences" onAction={() => setFinderStep(0)} />}</div>}
         </aside>}
         {panel === 'checkout' && <aside className="drawer right-drawer checkout-drawer" role="dialog" aria-modal="true" aria-label="Checkout">
           <div className="drawer-top"><div><div className="eyebrow">SECURE CHECKOUT</div><h2>Your delivery details</h2></div><button className="icon-button" onClick={() => setPanel(null)} aria-label="Close checkout"><X size={20} /></button></div>
           <p className="checkout-note">Guest checkout is welcome. Your bag total is <strong>{money(cartTotal)}</strong>.</p>
           <form onSubmit={startCheckout} className="checkout-form">
-            {([['name', 'Full name'], ['email', 'Email address'], ['phone', 'Phone number'], ['address', 'Delivery address'], ['city', 'City'], ['region', 'Region']] as const).map(([field, label]) =>
-              <label className="form-label" key={field}>{label}<input required type={field === 'email' ? 'email' : 'text'} autoComplete={field === 'name' ? 'name' : field === 'email' ? 'email' : field === 'phone' ? 'tel' : 'street-address'} value={checkoutForm[field]} onChange={(e) => setCheckoutForm((current) => ({ ...current, [field]: e.target.value }))} /></label>)}
+            {([['name', 'Full name'], ['email', 'Email address'], ['phone', 'Phone number'], ['address', 'Delivery address'], ['city', 'City'], ['region', 'Region'], ['postalCode', 'Postal or GhanaPost GPS code']] as const).map(([field, label]) =>
+              <label className="form-label" key={field}>{label}<input required={field !== 'postalCode'} type={field === 'email' ? 'email' : 'text'} autoComplete={field === 'name' ? 'name' : field === 'email' ? 'email' : field === 'phone' ? 'tel' : field === 'address' ? 'street-address' : field === 'city' ? 'address-level2' : field === 'region' ? 'address-level1' : 'postal-code'} value={checkoutForm[field]} onChange={(e) => setCheckoutForm((current) => ({ ...current, [field]: e.target.value }))} /></label>)}
             {checkoutError && <p className="checkout-error" role="alert">{checkoutError}</p>}
-            <p className="checkout-note">Payment and delivery fees are confirmed by the secure store checkout service. No payment is taken until that service is available.</p>
-            <button className="primary-button full-button" type="submit">Continue to payment <ArrowRight size={16} /></button>
+            <p className="checkout-note">Pay securely with Paystack. Your current sale prices, product availability and Ghana cedi total are verified before payment. Delivery charges are not included in the online total.</p>
+            <button className="primary-button full-button" type="submit" disabled={checkoutBusy}>{checkoutBusy ? 'Preparing secure payment…' : 'Continue to payment'} <ArrowRight size={16} /></button>
           </form>
         </aside>}
       </div>}
@@ -465,39 +494,217 @@ function UserIcon({ size = 19 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg>;
 }
 
-function ProductCard({ product, saved, onOpen, onSave, onAdd }: { product: Fragrance; saved: boolean; onOpen: () => void; onSave: () => void; onAdd: () => void }) {
+type CustomerOrder = {
+  orderId: string;
+  customer: { name: string; email: string; phone: string; address: string; city: string; region: string; postalCode?: string };
+  items: { productId: string; name: string; brand: string; image: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number }[];
+  currency: 'GHS';
+  totalMinor: number;
+  paymentStatus: string;
+  status: string;
+  createdAt?: { toDate?: () => Date } | string | null;
+};
+
+function OrderTrackingPage({ user, authLoading, onPaymentConfirmed }: {
+  user: User | null;
+  authLoading: boolean;
+  onPaymentConfirmed: () => void;
+}) {
+  const [orders, setOrders] = useState<CustomerOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState('');
+  const [orderId, setOrderId] = useState('');
+  const [email, setEmail] = useState('');
+  const [guestOrder, setGuestOrder] = useState<CustomerOrder | null>(null);
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupError, setLookupError] = useState('');
+  const [paymentNotice, setPaymentNotice] = useState('');
+  const [paymentError, setPaymentError] = useState('');
+
+  useEffect(() => {
+    if (!user || !db) {
+      setOrders([]);
+      setOrdersLoading(false);
+      return;
+    }
+    setOrdersLoading(true);
+    const ordersQuery = query(collection(db, 'orders'), where('userId', '==', user.uid));
+    return onSnapshot(ordersQuery, (snapshot) => {
+      const customerOrders = snapshot.docs
+        .map((entry) => ({ ...entry.data(), orderId: entry.id }) as CustomerOrder)
+        .sort((left, right) => orderDate(right).getTime() - orderDate(left).getTime());
+      setOrders(customerOrders);
+      setOrdersLoading(false);
+      setOrdersError('');
+    }, (reason) => {
+      console.error('Could not load customer orders.', reason);
+      setOrdersError('Your orders could not be loaded. Please refresh or contact support.');
+      setOrdersLoading(false);
+    });
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    const url = new URL(window.location.href);
+    const reference = url.searchParams.get('reference') || url.searchParams.get('trxref');
+    if (!reference) return;
+    let checkout: { orderId?: string; email?: string } = {};
+    try {
+      checkout = JSON.parse(sessionStorage.getItem('tpn-pending-checkout') ?? '{}') as typeof checkout;
+    } catch (reason) {
+      console.error('The saved Paystack return details were invalid.', reason);
+    }
+    setOrderId(reference);
+    if (checkout.orderId === reference && checkout.email) setEmail(checkout.email);
+    const verify = async () => {
+      if (!functions) {
+        setPaymentError('Payment confirmation is unavailable. Use the order ID and checkout email below to check your order.');
+        return;
+      }
+      try {
+        const verifyPayment = httpsCallable<
+          { reference: string; email?: string },
+          { orderId: string; paymentStatus: string; status: string }
+        >(functions, 'verifyPaystackOrder');
+        const result = await verifyPayment({ reference, email: checkout.email ?? '' });
+        if (result.data.paymentStatus === 'paid') {
+          setPaymentNotice(`Payment received. Your order ${result.data.orderId} is confirmed.`);
+          onPaymentConfirmed();
+          setGuestOrder(null);
+        } else {
+          setPaymentNotice(`Payment for order ${result.data.orderId} is still being confirmed. You can check again below.`);
+        }
+      } catch (reason) {
+        console.error('Could not verify the returned Paystack payment.', reason);
+        setPaymentError('We could not confirm the payment yet. Your order ID is saved below; check again shortly or look up your order.');
+      } finally {
+        sessionStorage.removeItem('tpn-pending-checkout');
+      }
+    };
+    void verify();
+    url.searchParams.delete('reference');
+    url.searchParams.delete('trxref');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [authLoading, user?.uid, onPaymentConfirmed]);
+
+  const lookup = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!functions) {
+      setLookupError('Order lookup is unavailable until Firebase is configured.');
+      return;
+    }
+    setLookupBusy(true);
+    setLookupError('');
+    setGuestOrder(null);
+    try {
+      const findOrder = httpsCallable<
+        { orderId: string; email: string },
+        CustomerOrder
+      >(functions, 'lookupGuestOrder');
+      const result = await findOrder({ orderId: orderId.trim().toUpperCase(), email: email.trim().toLowerCase() });
+      setGuestOrder(result.data);
+      if (result.data.paymentStatus === 'pending') {
+        const verifyPayment = httpsCallable<
+          { reference: string; email?: string },
+          { orderId: string; paymentStatus: string; status: string }
+        >(functions, 'verifyPaystackOrder');
+        const verification = await verifyPayment({ reference: result.data.orderId, email: email.trim().toLowerCase() });
+        const refreshed = await findOrder({ orderId: result.data.orderId, email: email.trim().toLowerCase() });
+        setGuestOrder(refreshed.data);
+        if (verification.data.paymentStatus === 'paid') {
+          setPaymentNotice(`Payment received. Your order ${result.data.orderId} is confirmed.`);
+          onPaymentConfirmed();
+        }
+      }
+    } catch (reason) {
+      console.error('Guest order lookup failed.', reason);
+      setLookupError(reason instanceof Error && reason.message.includes('No guest order')
+        ? 'No guest order matched that order ID and email.'
+        : 'We could not find or refresh that order. Check the details and try again.');
+    } finally {
+      setLookupBusy(false);
+    }
+  };
+
+  return <section className="content-page orders-page">
+    <div className="eyebrow">YOUR PERFUME NERD</div><h1>Your orders.</h1>
+    <p className="page-intro">Follow your fragrance delivery from payment through to your door.</p>
+    {paymentNotice && <div className="order-notice success" role="status"><Check size={18} /><span>{paymentNotice}</span></div>}
+    {paymentError && <p className="auth-error" role="alert">{paymentError}</p>}
+    {!authLoading && user && <section className="orders-section"><div className="orders-section-heading"><h2>Account orders</h2><span>{orders.length} {orders.length === 1 ? 'order' : 'orders'}</span></div>
+      {ordersError && <p className="auth-error" role="alert">{ordersError}</p>}
+      {ordersLoading ? <p className="storefront-loading">Loading your orders…</p> : orders.length
+        ? <div className="orders-list">{orders.map((order) => <OrderCard key={order.orderId} order={order} />)}</div>
+        : <p className="admin-empty-note">Orders placed while signed in will appear here.</p>}
+    </section>}
+    <section className="guest-order-panel">
+      <div className="orders-section-heading"><div><h2>Find an order</h2><p>Guest checkout? Enter the order ID and email used at checkout.</p></div></div>
+      <form className="guest-order-form" onSubmit={lookup}>
+        <label className="form-label">Order ID<input autoComplete="off" value={orderId} onChange={(event) => setOrderId(event.target.value.toUpperCase())} placeholder="TPN-YYYYMMDD-0123456789ABCDEF0123456789ABCDEF" required /></label>
+        <label className="form-label">Checkout email<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+        {lookupError && <p className="auth-error" role="alert">{lookupError}</p>}
+        <button className="primary-button" type="submit" disabled={lookupBusy}>{lookupBusy ? 'Checking order…' : 'Track order'} <ArrowRight size={15} /></button>
+      </form>
+      {guestOrder && <div className="orders-list"><OrderCard order={guestOrder} /></div>}
+    </section>
+  </section>;
+}
+
+function orderDate(order: CustomerOrder): Date {
+  if (typeof order.createdAt === 'string') return new Date(order.createdAt);
+  return order.createdAt?.toDate?.() ?? new Date(0);
+}
+
+function OrderCard({ order }: { order: CustomerOrder }) {
+  return <article className="customer-order-card">
+    <header className="customer-order-heading"><div><span className="eyebrow">ORDER ID</span><strong>{order.orderId}</strong><small>{orderDate(order).getTime() ? orderDate(order).toLocaleString() : 'Just placed'}</small></div>
+      <span className={`order-status-pill ${order.paymentStatus === 'paid' ? 'paid' : ''}`}>{order.paymentStatus === 'paid' ? order.status.replaceAll('_', ' ') : order.paymentStatus.replaceAll('_', ' ')}</span>
+    </header>
+    <div className="customer-order-items">{order.items.map((item) => <div key={item.productId} className="customer-order-item"><img src={item.image} alt="" /><span><strong>{item.name}</strong><small>{item.brand} · Qty {item.quantity}</small></span><b>{money(item.lineTotalMinor / 100)}</b></div>)}</div>
+    <div className="customer-order-footer"><span>{order.customer.name} · {order.customer.phone}<small>{order.customer.address}, {order.customer.city}, {order.customer.region}</small></span><strong>{money(order.totalMinor / 100)}</strong></div>
+  </article>;
+}
+
+function ProductCard({ product, saved, onOpen, onSave, onAdd, priority = false }: { product: Fragrance; saved: boolean; onOpen: () => void; onSave: () => void; onAdd: () => void; priority?: boolean }) {
   return <article className="product-card">
-    <div className="product-image-wrap"><button className="product-image-button" onClick={onOpen} aria-label={`View ${product.name}`}><img src={product.image} alt={`${product.name} by ${product.brand}`} loading="lazy" /></button>
-      {product.badge && <span className="product-badge">{product.badge}</span>}
+    <div className="product-image-wrap"><button className="product-image-button" onClick={onOpen} aria-label={`View ${product.name}`}><img src={optimizedProductImage(product.image)} alt={`${product.name} by ${product.brand}`} loading={priority ? 'eager' : 'lazy'} decoding="async" /></button>
+      {product.isOnSale && <span className="product-badge sale-badge">SALE</span>}
+      {product.badge && <span className={`product-badge ${product.isOnSale ? 'product-badge-secondary' : ''}`}>{product.badge}</span>}
       <button className={`wishlist-toggle ${saved ? 'saved' : ''}`} onClick={onSave} aria-label={saved ? `Remove ${product.name} from wishlist` : `Save ${product.name} to wishlist`}><Heart size={17} fill={saved ? 'currentColor' : 'none'} /></button>
       <button className="quick-add" onClick={onAdd} disabled={product.stock <= 0}>{product.stock > 0 ? <><Plus size={15} /><span>Add</span></> : 'Sold out'}</button>
     </div>
-    <button className="product-copy" onClick={onOpen}><span className="product-brand">{product.brand}</span><span className="product-name">{product.name}</span><span className="product-price">{money(product.price)}</span><span className="product-category-label">{getFragranceCategories(product).join(' · ')}</span></button>
+    <button className="product-copy" onClick={onOpen}><span className="product-brand">{product.brand}</span><span className="product-name">{product.name}</span><span className="product-price">{money(product.price)}{product.originalPrice !== undefined && <del>{money(product.originalPrice)}</del>}</span><span className="product-category-label">{getFragranceCategories(product).join(' · ')}</span></button>
   </article>;
 }
 
 function HomePage({ products: inventory, settings, storefrontError, onNavigate, onCategory, onFinder, onNotice, card }: {
   products: Fragrance[]; settings: StorefrontSettings; storefrontError: string; onNavigate: (tab: Tab) => void; onCategory: (category: string) => void;
-  onFinder: () => void; onNotice: () => void; card: (product: Fragrance) => ReactNode;
+  onFinder: () => void; onNotice: () => void; card: (product: Fragrance, priority?: boolean) => ReactNode;
 }) {
-  const collections = [
-    { title: 'For him', subtitle: 'Considered, confident, unforgettable.', category: 'Men', image: 'photo-1615634260167-c8cdede054de' },
-    { title: 'For her', subtitle: 'A scent that says everything.', category: 'Women', image: 'photo-1592945403244-b3fbafd7f539' },
-    { title: 'For everyone', subtitle: 'Beyond the expected.', category: 'Unisex', image: 'photo-1594035910387-fea47794261f' },
-  ] as const;
+  const heroImage = settings.heroImage || '';
   return <div className="home-page">
-    <section className="hero"><img className="hero-image" src={settings.heroImage || 'https://images.unsplash.com/photo-1594035910387-fea47794261f?auto=format&fit=crop&w=1900&q=88'} alt="A sculptural fragrance bottle in warm studio light" />
-      <div className="hero-shade" /><div className="hero-copy"><h1>{(settings.heroTitle || 'Discover your\nsignature scent.').split('\n').map((line, index) => <Fragment key={`${index}-${line}`}>{index > 0 && <br />}{line}</Fragment>)}</h1><p>{settings.heroText || 'Helping you smell Luxurious on a Budget'}</p><button className="light-button" onClick={() => onNavigate('Search')}>Explore the collection <ArrowRight size={16} /></button></div>
-      <span className="hero-caption">{settings.heroCaption || 'THE ART OF SCENT · ACCRA, GHANA'}</span>
+    <section className="hero">{heroImage && <LoadedImage key={heroImage} className="hero-image" src={heroImage} alt="A sculptural fragrance bottle in warm studio light" />}
+      <div className="hero-shade" /><div className="hero-copy"><h1>{(settings.heroTitle || defaultHeroSettings.heroTitle).split('\n').map((line, index) => <Fragment key={`${index}-${line}`}>{index > 0 && <br />}{line}</Fragment>)}</h1><p>{settings.heroText || defaultHeroSettings.heroText}</p><button className="light-button" onClick={() => onNavigate('Search')}>{settings.heroButtonText || defaultHeroSettings.heroButtonText} <ArrowRight size={16} /></button></div>
+      <span className="hero-caption">{settings.heroCaption || defaultHeroSettings.heroCaption}</span>
     </section>
     {storefrontError && <p className="storefront-error" role="status">{storefrontError}</p>}
     <section className="category-section section-pad"><div className="section-heading"><h2>Shop by collection</h2></div>
-      <div className="category-grid">{collections.map((item) => <button className="category-card" key={item.title} onClick={() => onCategory(item.category)}>
-        <img src={`https://images.unsplash.com/${item.image}?auto=format&fit=crop&w=900&q=85`} alt="" loading="lazy" /><span className="category-overlay" /><span className="category-copy"><span>{item.title}</span><small>{item.subtitle}</small></span><ArrowRight className="category-arrow" size={18} />
-      </button>)}</div>
+      <div className="category-grid">{defaultCollectionSettings.map((item) => {
+        const key = item.id[0].toUpperCase() + item.id.slice(1);
+        const titleField = `collection${key}Title` as 'collectionMenTitle' | 'collectionWomenTitle' | 'collectionUnisexTitle';
+        const subtitleField = `collection${key}Subtitle` as 'collectionMenSubtitle' | 'collectionWomenSubtitle' | 'collectionUnisexSubtitle';
+        const imageField = `collection${key}Image` as 'collectionMenImage' | 'collectionWomenImage' | 'collectionUnisexImage';
+        const title = settings[titleField] || item.title;
+        const subtitle = settings[subtitleField] || item.subtitle;
+        const image = settings[imageField] || item.image;
+        return <button className="category-card" key={item.id} onClick={() => onCategory(item.category)}>
+          {image && <LoadedImage key={image} className="" src={image} alt="" />}
+          <span className="category-overlay" /><span className="category-copy"><span>{title}</span><small>{subtitle}</small></span><ArrowRight className="category-arrow" size={18} />
+        </button>;
+      })}</div>
     </section>
     <ProductShelf title="The most loved" products={inventory.filter((item) => item.badge === 'BEST SELLER')} card={card} />
-    <section className="finder-promo"><div><div className="eyebrow">A LITTLE HELP FINDING YOUR WAY</div><h2>There’s a scent<br />that feels like you.</h2><p>Tell us what you love. We’ll make a few thoughtful suggestions.</p><button className="primary-button" onClick={onFinder}>Find your signature scent <ArrowRight size={15} /></button></div><div className="promo-image"><img src="https://images.unsplash.com/photo-1547887538-e3a2f32cb1cc?auto=format&fit=crop&w=1000&q=85" alt="Perfume bottle with a soft floral arrangement" loading="lazy" /><span>YOUR SCENT STORY STARTS HERE</span></div></section>
+    <section className="finder-promo"><div><div className="eyebrow">{settings.finderEyebrow || defaultFinderSettings.eyebrow}</div><h2>{(settings.finderTitle || defaultFinderSettings.title).split('\n').map((line, index) => <Fragment key={`${index}-${line}`}>{index > 0 && <br />}{line}</Fragment>)}</h2><p>{settings.finderText || defaultFinderSettings.text}</p><button className="primary-button" onClick={onFinder}>{settings.finderButtonText || defaultFinderSettings.buttonText} <ArrowRight size={15} /></button></div><div className="promo-image">{(settings.finderImage || defaultFinderSettings.image) && <LoadedImage key={settings.finderImage || defaultFinderSettings.image} className="" src={settings.finderImage || defaultFinderSettings.image} alt="Perfume bottle with a soft floral arrangement" />}<span>{settings.finderCaption || defaultFinderSettings.caption}</span></div></section>
     <section className="trust-section"><div className="eyebrow">A MORE THOUGHTFUL WAY TO SHOP</div><h2>Good scent. No guesswork.</h2><div className="trust-grid"><div><span className="trust-number">01</span><h3>Find your point of view</h3><p>Explore by notes, families and the feelings you want to leave behind.</p></div><div><span className="trust-number">02</span><h3>Make it personal</h3><p>Take a moment with our fragrance finder to discover a direction.</p></div><div><span className="trust-number">03</span><h3>Shop with confidence</h3><p>We’re building a considered fragrance destination in Ghana.</p></div></div><p className="trust-disclaimer">Product availability and business services shown in this preview are sample data and require verification before launch.</p></section>
     <footer className="site-footer"><a className="wordmark footer-wordmark" href="/" onClick={(e) => { e.preventDefault(); onNavigate('Home'); }}>
       <img className="footer-brand-logo" src="/IMAGES/PERFUME-NERD-LOGO.png" alt="" />
@@ -506,16 +713,16 @@ function HomePage({ products: inventory, settings, storefrontError, onNavigate, 
   </div>;
 }
 
-function ProductShelf({ title, products: items, card }: { title: string; products: Fragrance[]; card: (product: Fragrance) => ReactNode }) {
+function ProductShelf({ title, products: items, card }: { title: string; products: Fragrance[]; card: (product: Fragrance, priority?: boolean) => ReactNode }) {
   return <section className="shelf-section section-pad"><div className="section-heading"><h2>{title}</h2></div>
-    <div className="shelf-row">{items.map(card)}</div></section>;
+    <div className="shelf-row">{items.map((product) => card(product))}</div></section>;
 }
 
 function ProductDetail({ product, saved, onSave, onAdd, onClose }: { product: Fragrance; saved: boolean; onSave: () => void; onAdd: () => void; onClose: () => void }) {
   return <aside className="drawer right-drawer detail-drawer" role="dialog" aria-modal="true" aria-label={`${product.name} product details`}>
     <div className="drawer-top detail-top"><button className="text-button" onClick={onClose}><ArrowLeft size={16} /> Back to collection</button><button className="icon-button" onClick={onClose} aria-label="Close product details"><X size={20} /></button></div>
     <div className="detail-image"><img src={product.image} alt={`${product.name} by ${product.brand}`} /><button className={`wishlist-toggle detail-heart ${saved ? 'saved' : ''}`} onClick={onSave} aria-label={saved ? 'Remove from wishlist' : 'Save to wishlist'}><Heart size={19} fill={saved ? 'currentColor' : 'none'} /></button></div>
-    <div className="detail-copy"><span className="eyebrow">{product.brand.toUpperCase()}</span><h2>{product.name}</h2><div className="detail-price">{money(product.price)} <span>{product.concentration}</span></div><p className="detail-description">{product.description}</p>
+    <div className="detail-copy"><span className="eyebrow">{product.isOnSale ? 'SALE · ' : ''}{product.brand.toUpperCase()}</span><h2>{product.name}</h2><div className="detail-price">{money(product.price)}{product.originalPrice !== undefined && <del>{money(product.originalPrice)}</del>} <span>{product.concentration}</span></div><p className="detail-description">{product.description}</p>
       <div className="detail-stock">{product.stock > 0 ? <><span className="stock-dot" /> In stock · {product.stock} in this sample inventory</> : 'Currently unavailable'}</div>
       <button className="primary-button full-button detail-add" onClick={onAdd} disabled={product.stock <= 0}>{product.stock > 0 ? 'Add to bag' : 'Sold out'} <ArrowRight size={16} /></button>
       <div className="detail-facts"><div><span>COLLECTION</span><strong>{getFragranceCategories(product).join(' · ')}</strong></div><div><span>SCENT FAMILY</span><strong>{product.family}</strong></div><div><span>SCENT PROFILE</span><strong>{product.notes.join(' · ')}</strong></div><div><span>OCCASION</span><strong>{product.occasion.join(' · ')}</strong></div><div><span>CONCENTRATION</span><strong>{product.concentration}</strong></div></div>

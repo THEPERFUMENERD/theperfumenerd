@@ -16,6 +16,8 @@ export type Fragrance = {
   description: string;
   image: string;
   badge?: string;
+  originalPrice?: number;
+  isOnSale?: boolean;
   stock: number;
 };
 
@@ -46,3 +48,24 @@ export const products: Fragrance[] = [
 
 export const money = (amount: number) =>
   new Intl.NumberFormat('en-GH', { style: 'currency', currency: 'GHS', maximumFractionDigits: 0 }).format(amount);
+
+export const optimizedCloudinaryImage = (imageUrl: string, width = 1600) => {
+  try {
+    const url = new URL(imageUrl);
+    if (url.hostname !== 'res.cloudinary.com') return imageUrl;
+    const uploadMarker = '/image/upload/';
+    const markerIndex = url.pathname.indexOf(uploadMarker);
+    if (markerIndex === -1) return imageUrl;
+    const remainingPath = url.pathname.slice(markerIndex + uploadMarker.length);
+    const firstSegment = remainingPath.split('/')[0];
+    if (/^(?:a_|b_|c_|dpr_|e_|f_|fl_|g_|h_|l_|q_|r_|t_|w_|x_|y_|z_|ar_|w_auto|q_auto)/.test(firstSegment)) {
+      return imageUrl;
+    }
+    url.pathname = `${url.pathname.slice(0, markerIndex + uploadMarker.length)}f_auto,q_auto,w_${width}/${remainingPath}`;
+    return url.toString();
+  } catch {
+    return imageUrl;
+  }
+};
+
+export const optimizedProductImage = (imageUrl: string) => optimizedCloudinaryImage(imageUrl, 720);

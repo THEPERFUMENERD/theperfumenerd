@@ -32,7 +32,7 @@ After registration, the Account page checks verification automatically while it 
 
 Signed-in customers can view and update their name, phone number, and delivery address details on the Account page. Their email address comes from Firebase Authentication, and verified accounts show a simple “Verified” status. Customer profile documents are private to their owner under the Firestore rules.
 
-The admin workspace is at `/admin`. Product changes, homepage hero/announcement content, and customer feedback use live Firestore listeners. Product and storefront images upload directly to Cloudinary using separate unsigned presets restricted to JPG, PNG, and WebP files, with Cloudinary-generated IDs and dedicated asset folders. The app limits uploads to 5 MB in the admin UI; unsigned presets do not enforce this client-side size limit against arbitrary requests. The Cloudinary API secret is used only by the local setup script and is never added to browser configuration. Apply the included Firestore rules before using the workspace:
+The admin workspace is at `/admin`. Product changes, homepage header image and copy, collection-card content and images, the collection/search page header, and the fragrance-finder feature (in **Website Images**), storefront announcement/footer content, and customer feedback use live Firestore listeners. The collection-page header's eyebrow, headline, supporting text, image, and image caption are editable; product count and Accra location remain dynamic/fixed. The storefront keeps the last server-confirmed public catalog and settings in browser-local storage for quick startup, ignores potentially stale Firestore cache events, and updates from Firestore when fresh server data arrives. Replacing or clearing a website image replaces that image URL in published settings; the storefront does not retain the old URL as a fallback. Product and storefront images upload directly to Cloudinary using separate unsigned presets restricted to JPG, PNG, and WebP files, with Cloudinary-generated IDs and dedicated asset folders. The app limits uploads to 5 MB in the admin UI; unsigned presets do not enforce this client-side size limit against arbitrary requests. The Cloudinary API secret is used only by the local setup script and is never added to browser configuration. Apply the included Firestore rules before using the workspace:
 
 ```powershell
 .\node_modules\.bin\firebase.cmd deploy --only firestore:rules
@@ -53,7 +53,7 @@ npm.cmd run admin:grant -- admin@example.com
 
 The script preserves existing custom claims and sets `admin: true`. Have the administrator sign out and back in to refresh the ID token. Never grant this claim from a browser, a Firestore user document, or a customer-editable profile field. Publicly writable feedback has basic Firestore field/size validation; enable Firebase App Check in the project and enforce it before production to reduce automated abuse.
 
-The admin dashboard currently covers overview, product create/edit/remove, storefront visibility, and multiple Men/Women/Unisex category assignments per fragrance, homepage hero and announcement content, Cloudinary image uploads, and a live customer-feedback inbox. Older catalog records with one `category` remain supported. It does not yet include order/payment management, staff permissions, audit logs, customer/order lookup, or automated abuse throttling.
+The admin dashboard currently covers overview, product create/edit/remove, storefront visibility, and multiple Men/Women/Unisex category assignments per fragrance, homepage hero and announcement content, Cloudinary image uploads, mutually exclusive all-products percentage or selected-product price sales, a live customer-feedback inbox, customer orders and registered users. Orders include payment, delivery and item details; admins can update fulfillment status. User accounts are read from Firebase Authentication and combined with their private profile contact details. Discounted prices, sale labels, and cart totals update from live storefront settings and product records; all-products sale prices are rounded to the nearest whole Ghana cedi. Older catalog records with one `category` remain supported. Staff permissions, audit logs and automated abuse throttling are not implemented.
 
 ### Point of Sale — initial release
 
@@ -73,16 +73,40 @@ Deploy the Functions runtime as well as Firestore/Storage rules before using the
 
 Cloud Functions deployment requires an eligible Firebase billing plan and an authenticated, authorized Firebase CLI. App Check is not enforced by the callable because this project does not yet configure App Check; the callable still enforces the Firebase identity and admin authorization server-side.
 
-This is the initial POS slice, not the complete master specification: it supports one existing catalog product per stock item and confirmed cash sales only. Online checkout remains unimplemented, so it cannot deduct from shared stock. Product variants and barcode/SKU fields, customer database linking, Mobile Money/card/split payments and provider verification, tax/discount configuration, refunds/returns, manager/cashier roles, registers/shifts, multi-branch inventory, sales-history/reporting screens, and offline synchronization are not implemented. Do not treat it as a complete retail or online inventory system until these capabilities and production operational controls are added and verified.
+This is the initial POS slice, not the complete master specification: it supports existing catalog products and confirmed cash sales. The online Paystack flow below also deducts shared stock after verified payment. Product variants and barcode/SKU fields, customer database linking, split payments, tax configuration, refunds/returns, manager/cashier roles, registers/shifts, multi-branch inventory, sales-history/reporting screens, and offline synchronization are not implemented. Do not treat the combined POS and online store as a complete retail system until these capabilities and production operational controls are added and verified.
 
 ## Preview data and launch requirements
 
 The products and prices in `src/catalog.ts` and all displayed stock are illustrative development samples. Replace them with verified inventory, product imagery, prices, sourcing information and stock before launch. The font and Unsplash imagery in this preview are not supplied or licensed by the business.
 
-The storefront currently implements responsive collection browsing, search, category/family/availability filtering, product details, the fragrance finder, a browser-persisted guest wishlist and cart, and a guest checkout form. Checkout posts to `/api/checkout`; that endpoint is deliberately not included. The form reports the unavailable secure checkout service rather than simulating a payment.
+The storefront currently implements responsive collection browsing, search, category/family/availability filtering, product details, the fragrance finder, a browser-persisted guest wishlist and cart, and guest or signed-in checkout. Paystack checkout creates a server-priced pending order, verifies successful payment with Paystack or its signed webhook, and deducts stock only after payment confirmation. Signed-in customers can view live order history; guests can look up an order using its generated ID and checkout email.
 
-This is a frontend preview, **not a production-ready commerce system**. Firebase Authentication, a Firestore-backed editable storefront/admin workspace, and baseline Firestore/Storage rules are implemented, but rules must be deployed and an administrator claim provisioned before live admin editing works. The app does not yet include Paystack transaction initialization or webhook verification, order tracking, full real-time support chat, a production order system, audit logs, or operational monitoring. Do not accept real orders with this preview.
+### Paystack checkout and order management
 
-Before production, provision Firebase and configure restricted server-side credentials for Paystack; implement and test the server-authoritative checkout, payment verification and idempotent webhook flow; replace sample data; set actual delivery, contact and policy information; and test authorization, payment and database rules in the Firebase Emulator Suite and Paystack test mode. Never put a Paystack secret key or Firebase service-account credential in browser code.
+The Paystack secret is used only by Firebase Functions, not by the browser. Add `PAYSTACK_SECRET_KEY=...` to the ignored root `.env.local` file (without a `VITE_` prefix), then run:
+
+```powershell
+npm.cmd run paystack:configure
+```
+
+This writes the value to the ignored `functions/.env.the-perfume-nerd` file, which Firebase Functions loads as a server environment variable. It is not exposed as a `VITE_` browser setting. Deploy the Functions and current Firestore rules with:
+
+```powershell
+.\node_modules\.bin\firebase.cmd deploy --only functions,firestore:rules --project the-perfume-nerd
+```
+
+This Firebase environment-file approach avoids Secret Manager but is less protected than a managed secret. Keep both `.env.local` and `functions/.env.the-perfume-nerd` private and never commit or share them. Deploying Firebase Functions may require the project to use the Blaze billing plan.
+
+Use the Paystack **test secret key** while validating in test mode and the live secret only for production. The store return URL defaults to the production storefront URL in `functions/index.js`; update that value if the storefront domain changes. In the Paystack dashboard, configure the webhook URL shown for the deployed `paystackWebhook` function (typically `https://us-central1-PROJECT_ID.cloudfunctions.net/paystackWebhook`) and subscribe to successful charge events. The webhook signature is verified, and the callable also verifies each returning transaction directly with Paystack. Only Firestore-backed prices, discounts, visibility and stock are trusted for payment calculations; browser-supplied prices are ignored. Pending orders are not deducted from stock. If stock is no longer sufficient after a successful charge, the order is marked for administrator review rather than silently overselling.
+
+For emulator checkout tests, run `npm.cmd run paystack:configure` first; the Functions emulator reads the ignored Functions environment file and sends Paystack returns to `http://localhost:5173/orders`. Use a Paystack test key for local checks.
+
+The customer Orders page is available from the hamburger menu. Signed-in users can track their own orders; guest orders require the order ID and checkout email. Firestore rules allow customers to read only their own signed-in orders and prohibit all browser-side order writes. Admin order status changes and user directory reads are performed through administrator-authorized Functions callables.
+
+Run the focused server price and checkout validation tests with `npm.cmd run test:online-orders`. Firestore order-access rules can be checked with `npm.cmd run test:rules`. A full payment round trip requires a configured Firebase Functions emulator/deployment and Paystack test credentials; do not perform a live charge as a routine test.
+
+Firebase Authentication, the Firestore-backed editable storefront/admin workspace, and baseline Firestore/Storage rules are implemented. Deploy current rules and provision an administrator claim before live admin editing works. Full real-time support chat, staff permissions, audit logs and operational monitoring are not included.
+
+Before production, provision Firebase and configure restricted server-side credentials for Paystack; replace sample data; set actual delivery, contact and policy information; configure and test the Paystack webhook in test mode; and verify authorization, payment and database rules in the Firebase Emulator Suite. Never put a Paystack secret key or Firebase service-account credential in browser code.
 
 No customer reviews, delivery promises, authenticity guarantees or other unverified business claims are included.

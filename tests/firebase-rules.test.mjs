@@ -125,6 +125,35 @@ test('customers can manage only their own bounded account profile', async () => 
   }));
 });
 
+test('customers can read only their own orders and nobody can write orders from the client', async () => {
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'orders', 'TPN-20260101-A1B2C3D4'), {
+      orderId: 'TPN-20260101-A1B2C3D4',
+      userId: 'customer',
+      paymentStatus: 'paid',
+      totalMinor: 120000,
+    });
+    await setDoc(doc(context.firestore(), 'orders', 'TPN-20260101-B1B2C3D4'), {
+      orderId: 'TPN-20260101-B1B2C3D4',
+      userId: null,
+      paymentStatus: 'paid',
+      totalMinor: 120000,
+    });
+  });
+  const customerDb = environment.authenticatedContext('customer').firestore();
+  const otherDb = environment.authenticatedContext('another-customer').firestore();
+  const guestDb = environment.unauthenticatedContext().firestore();
+  const adminDb = environment.authenticatedContext('administrator', { admin: true }).firestore();
+  const ownOrders = query(collection(customerDb, 'orders'), where('userId', '==', 'customer'));
+  await assertSucceeds(getDocs(ownOrders));
+  await assertFails(getDoc(doc(otherDb, 'orders', 'TPN-20260101-A1B2C3D4')));
+  await assertFails(getDoc(doc(guestDb, 'orders', 'TPN-20260101-B1B2C3D4')));
+  await assertSucceeds(getDoc(doc(adminDb, 'orders', 'TPN-20260101-A1B2C3D4')));
+  await assertFails(setDoc(doc(customerDb, 'orders', 'forged-order'), { totalMinor: 1 }));
+  await assertFails(updateDoc(doc(adminDb, 'orders', 'TPN-20260101-A1B2C3D4'), { status: 'delivered' }));
+  await assertFails(getDocs(collection(otherDb, 'orders')));
+});
+
 test('POS records are backend-only and customer display links reveal only their active cart', async () => {
   const adminDb = environment.authenticatedContext('administrator', { admin: true }).firestore();
   const customerDb = environment.authenticatedContext('customer').firestore();

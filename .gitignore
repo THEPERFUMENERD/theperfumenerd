@@ -2,6 +2,9 @@ node_modules/
 dist/
 .env
 .env.*
+.secret.local
+functions/.secret.local
+functions/.env.the-perfume-nerd
 !.env.example
 !.env.cloudinary.example
 *.tsbuildinfo

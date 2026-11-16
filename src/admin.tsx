@@ -1,19 +1,33 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   collection, deleteDoc, doc, limit, onSnapshot, orderBy, query,
   serverTimestamp, setDoc, updateDoc,
 } from 'firebase/firestore';
-import { ArrowLeft, Check, ImagePlus, LayoutDashboard, MessageSquare, Package, Plus, Save, Search, Settings, ShoppingCart, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ClipboardList, Image as ImageIcon, ImagePlus, LayoutDashboard, MessageSquare, Package, Percent, Plus, Save, Search, Settings, ShoppingCart, Trash2, Users, X } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import { signOut } from 'firebase/auth';
+import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions, isFirebaseConfigured } from './firebase';
+import { LoadedImage } from './LoadedImage';
 import { fragranceCategories, getFragranceCategories, money, products as sampleProducts, type Fragrance } from './catalog';
-import type { StorefrontSettings } from './storefront-data';
+import { cacheStorefrontSettings, defaultCollectionHeroSettings, defaultCollectionSettings, defaultFinderSettings, defaultHeroSettings, type StorefrontSettings } from './storefront-data';
 
-type AdminSection = 'overview' | 'products' | 'storefront' | 'feedback';
+type AdminSection = 'overview' | 'products' | 'orders' | 'users' | 'discount-sales' | 'website-images' | 'storefront' | 'feedback';
+type ImageUploadTarget = 'hero' | 'collectionHero' | 'collectionMen' | 'collectionWomen' | 'collectionUnisex' | 'finder';
+type UploadTarget = 'product' | ImageUploadTarget;
 type FeedbackItem = { id: string; message: string; name?: string; email?: string; status: string; createdAt?: { toDate: () => Date } };
 type ProductDraft = Omit<Fragrance, 'id'> & { id: string; visible?: boolean };
 type UploadError = Error & { code?: string };
+type AdminOrder = {
+  orderId: string;
+  customer: { name: string; email: string; phone: string; address: string; city: string; region: string; postalCode?: string };
+  items: { productId: string; name: string; brand: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number }[];
+  totalMinor: number;
+  paymentStatus: string;
+  status: string;
+  createdAt?: { toDate?: () => Date };
+};
+type AdminUser = { uid: string; name: string; email: string; phoneNumber: string; createdAt: string };
 const blankProduct: ProductDraft = {
   id: '', name: '', brand: '', price: 0, category: 'Unisex', categories: ['Unisex'], family: 'Woody',
   strength: 'Moderate', concentration: 'Eau de Parfum', notes: [], occasion: [],
@@ -21,6 +35,14 @@ const blankProduct: ProductDraft = {
 };
 const makeSlug = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const uploadError = (message: string, code: string): UploadError => Object.assign(new Error(message), { code });
+const websiteImageFields: (keyof StorefrontSettings)[] = [
+  'heroImage', 'heroTitle', 'heroText', 'heroCaption', 'heroButtonText',
+  'collectionMenTitle', 'collectionMenSubtitle', 'collectionMenImage',
+  'collectionWomenTitle', 'collectionWomenSubtitle', 'collectionWomenImage',
+  'collectionUnisexTitle', 'collectionUnisexSubtitle', 'collectionUnisexImage',
+  'finderEyebrow', 'finderTitle', 'finderText', 'finderButtonText', 'finderImage', 'finderCaption',
+  'collectionHeroEyebrow', 'collectionHeroTitle', 'collectionHeroText', 'collectionHeroImage', 'collectionHeroCaption',
+];
 
 export default function AdminPortal({ user, loading, isAdmin, claimLoading, claimError, onPos, onSignIn }: {
   user: User | null;
@@ -35,6 +57,11 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
   const [products, setProducts] = useState<Fragrance[]>([]);
   const [settings, setSettings] = useState<StorefrontSettings>({});
   const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [totalUsers, setTotalUsers] = useState<number | null>(null);
+  const [nextUsersPage, setNextUsersPage] = useState<string | null>(null);
+  const [usersLoading, setUsersLoading] = useState(false);
   const [draft, setDraft] = useState<ProductDraft>(blankProduct);
   const [editing, setEditing] = useState(false);
   const [search, setSearch] = useState('');
@@ -42,7 +69,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadTarget, setUploadTarget] = useState<'product' | 'hero' | null>(null);
+  const [uploadTarget, setUploadTarget] = useState<UploadTarget | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [settingsDraft, setSettingsDraft] = useState<StorefrontSettings>({});
   const uploadRequest = useRef<XMLHttpRequest | null>(null);
@@ -72,8 +99,38 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
       console.error('Admin feedback listener failed.', reason);
       setError('Could not load customer feedback. Confirm the feedback collection rules.');
     });
-    return () => { stopProducts(); stopSettings(); stopFeedback(); };
+    const ordersQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(100));
+    const stopOrders = onSnapshot(ordersQuery, (snapshot) => {
+      setOrders(snapshot.docs.map((entry) => ({ ...entry.data(), orderId: entry.id }) as AdminOrder));
+    }, (reason) => {
+      console.error('Admin order listener failed.', reason);
+      setError('Could not load customer orders. Publish the latest Firestore rules and confirm administrator access.');
+    });
+    return () => { stopProducts(); stopSettings(); stopFeedback(); stopOrders(); };
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (section !== 'users' || !isAdmin || !functions) return;
+    let active = true;
+    setUsersLoading(true);
+    setError('');
+    const listUsers = httpsCallable<
+      { pageToken?: string },
+      { users: AdminUser[]; nextPageToken: string | null; totalUsers: number }
+    >(functions, 'listAdminUsers');
+    listUsers({}).then(({ data }) => {
+      if (!active) return;
+      setAdminUsers(data.users);
+      setTotalUsers(data.totalUsers);
+      setNextUsersPage(data.nextPageToken);
+    }).catch((reason: unknown) => {
+      console.error('Could not load registered customer accounts.', reason);
+      if (active) setError('The registered user list could not be loaded. Confirm administrator access and deploy the latest Functions.');
+    }).finally(() => {
+      if (active) setUsersLoading(false);
+    });
+    return () => { active = false; };
+  }, [section, isAdmin]);
 
   const visibleProducts = useMemo(() => products.filter((item) =>
     `${item.name} ${item.brand}`.toLowerCase().includes(search.toLowerCase())), [products, search]);
@@ -162,7 +219,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
       fail(reason, 'The product could not be removed.');
     }
   };
-  const uploadImage = async (file: File | undefined, target: 'product' | 'hero') => {
+  const uploadImage = async (file: File | undefined, target: UploadTarget) => {
     if (!file) return;
     const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
     const uploadPreset = target === 'product'
@@ -224,11 +281,15 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
         cloudinaryRequest.onabort = () => reject(uploadError('The upload was canceled.', 'canceled'));
         cloudinaryRequest.send(body);
       });
-      if (target === 'product') setDraft((current) => ({ ...current, image: uploadedUrl }));
-      else setSettingsDraft((current) => ({ ...current, heroImage: uploadedUrl }));
+      if (target === 'product') {
+        setDraft((current) => ({ ...current, image: uploadedUrl }));
+      } else {
+        const imageField = target === 'hero' ? 'heroImage' : target === 'finder' ? 'finderImage' : `${target}Image` as keyof StorefrontSettings;
+        setSettingsDraft((current) => ({ ...current, [imageField]: uploadedUrl }));
+      }
       setMessage(target === 'product'
         ? 'Image uploaded to Cloudinary. Save the product to publish it.'
-        : 'Hero image uploaded to Cloudinary. Save storefront content to publish it.');
+        : 'Image uploaded to Cloudinary. Publish the website images to make it live.');
     } catch (reason: unknown) {
       const code = typeof reason === 'object' && reason !== null && 'code' in reason
         ? String(reason.code) : '';
@@ -248,30 +309,129 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
       setUploadProgress(0);
     }
   };
-  const saveSettings = async (event: FormEvent<HTMLFormElement>) => {
+  const saveSettings = async (event: FormEvent<HTMLFormElement>, fields: (keyof StorefrontSettings)[]) => {
     event.preventDefault();
     if (!db || !user) return;
     setBusy(true);
     clearAlerts();
     try {
+      const updatedSettings = Object.fromEntries(fields.map((field) => [field, settingsDraft[field] ?? '']));
       await setDoc(doc(db, 'storeSettings', 'public'), {
-        ...settingsDraft,
+        ...updatedSettings,
         updatedAt: serverTimestamp(),
         updatedBy: user.uid,
       }, { merge: true });
-      setMessage('Storefront content saved and published.');
+      cacheStorefrontSettings(updatedSettings);
+      setMessage(fields.includes('heroImage')
+        ? 'Website images and homepage header published.'
+        : 'Storefront content saved and published.');
     } catch (reason) {
       fail(reason, 'Storefront settings could not be saved.');
     } finally {
       setBusy(false);
     }
   };
+  const saveDiscountSettings = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!db || !user) return;
+    const mode = settingsDraft.discountMode ?? 'none';
+    const percentage = Number(settingsDraft.discountPercentage);
+    const productsById = new Map(products.map((product) => [product.id, product]));
+    const discountProducts = settingsDraft.discountProducts ?? [];
+    if (mode === 'all' && (!Number.isSafeInteger(percentage) || percentage < 1 || percentage > 95)) {
+      setError('Choose an all-products discount between 1% and 95%.');
+      return;
+    }
+    if (mode === 'selected') {
+      if (discountProducts.length === 0) {
+        setError('Add at least one published product before activating selected-product sales.');
+        return;
+      }
+      const invalid = discountProducts.some((item) => {
+        const product = productsById.get(item.productId);
+        const salePrice = Math.round(Number(item.salePrice));
+        return !product || (product as Fragrance & { visible?: boolean }).visible !== true
+          || !Number.isFinite(item.salePrice) || salePrice < 1 || salePrice >= product.price;
+      });
+      if (invalid) {
+        setError('Each sale price must be a whole Ghana cedi below the current price of a published product. Remove unavailable products or update their sale price.');
+        return;
+      }
+    }
+    setBusy(true);
+    clearAlerts();
+    try {
+      await setDoc(doc(db, 'storeSettings', 'public'), {
+        discountMode: mode,
+        discountPercentage: Number.isSafeInteger(percentage) ? percentage : 15,
+        discountProducts: discountProducts.map((item) => ({
+          productId: item.productId,
+          salePrice: Math.round(Number(item.salePrice)),
+        })),
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      }, { merge: true });
+      cacheStorefrontSettings({
+        discountMode: mode,
+        discountPercentage: Number.isSafeInteger(percentage) ? percentage : 15,
+        discountProducts: discountProducts.map((item) => ({
+          productId: item.productId,
+          salePrice: Math.round(Number(item.salePrice)),
+        })),
+      });
+      setMessage(mode === 'none' ? 'Discount sales are now turned off.' : 'Discount sale published. Storefront prices are updating live.');
+    } catch (reason) {
+      fail(reason, 'Discount sale settings could not be published.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const imageUploadControl = (target: ImageUploadTarget, label: string) => <>
+    <label className="admin-upload-button"><ImagePlus size={17} />{uploadTarget === target ? `Uploading… ${uploadProgress}%` : label}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { void uploadImage(event.currentTarget.files?.[0], target); event.currentTarget.value = ''; }} disabled={uploading} /></label>
+    {uploadTarget === target && <div className="admin-upload-status" role="status"><progress max="100" value={uploadProgress} /><span>{uploadProgress}% uploaded</span><button type="button" className="text-button" onClick={() => uploadRequest.current?.abort()}>Cancel upload</button></div>}
+  </>;
   const updateFeedbackStatus = async (item: FeedbackItem, status: 'read' | 'resolved') => {
     if (!db) return;
     try {
       await updateDoc(doc(db, 'feedback', item.id), { status, updatedAt: serverTimestamp() });
     } catch (reason) {
       fail(reason, 'Feedback status could not be updated.');
+    }
+  };
+  const updateOrderStatus = async (orderId: string, status: string) => {
+    if (!functions) {
+      setError('Order management is unavailable because Firebase Functions is not configured.');
+      return;
+    }
+    setBusy(true);
+    clearAlerts();
+    try {
+      const updateStatus = httpsCallable(functions, 'updateOnlineOrderStatus');
+      await updateStatus({ orderId, status });
+      setMessage(`Order ${orderId} updated.`);
+    } catch (reason) {
+      fail(reason, 'Order status could not be updated. Confirm the order is paid and try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const loadMoreUsers = async () => {
+    if (!functions || !nextUsersPage) return;
+    setUsersLoading(true);
+    clearAlerts();
+    try {
+      const listUsers = httpsCallable<
+        { pageToken?: string },
+        { users: AdminUser[]; nextPageToken: string | null; totalUsers: number }
+      >(functions, 'listAdminUsers');
+      const { data } = await listUsers({ pageToken: nextUsersPage });
+      setAdminUsers((current) => [...current, ...data.users]);
+      setTotalUsers(data.totalUsers);
+      setNextUsersPage(data.nextPageToken);
+    } catch (reason) {
+      fail(reason, 'More registered users could not be loaded.');
+    } finally {
+      setUsersLoading(false);
     }
   };
   const logoutAdmin = async () => {
@@ -311,6 +471,10 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
   const sections: { id: AdminSection; label: string; icon: typeof Package }[] = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'products', label: 'Products', icon: Package },
+    { id: 'orders', label: 'Orders', icon: ClipboardList },
+    { id: 'users', label: 'Users', icon: Users },
+    { id: 'discount-sales', label: 'Discount Sales', icon: Percent },
+    { id: 'website-images', label: 'Website Images', icon: ImageIcon },
     { id: 'storefront', label: 'Storefront', icon: Settings },
     { id: 'feedback', label: 'Feedback', icon: MessageSquare },
   ];
@@ -318,7 +482,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
     <aside className="admin-sidebar">
       <a className="admin-brand" href="/" aria-label="The Perfume Nerd storefront"><img src="/IMAGES/PERFUME-NERD-LOGO.png" alt="" /><span>THE PERFUME NERD<small>ADMIN STUDIO</small></span></a>
       <div className="admin-menu-label">WORKSPACE</div>
-      <nav className="admin-nav"><button onClick={onPos}><ShoppingCart size={17} />Point of Sale</button>{sections.map(({ id, label, icon: Icon }) => <button key={id} className={section === id ? 'selected' : ''} onClick={() => { setSection(id); setEditing(false); clearAlerts(); }}><Icon size={17} />{label}{id === 'feedback' && newFeedbackCount > 0 && <span className="admin-nav-count">{newFeedbackCount}</span>}</button>)}</nav>
+      <nav className="admin-nav"><button onClick={onPos}><ShoppingCart size={17} />Point of Sale</button>{sections.map(({ id, label, icon: Icon }) => <button key={id} className={section === id ? 'selected' : ''} onClick={() => { setSection(id); setEditing(false); clearAlerts(); }}><Icon size={17} />{label}{id === 'feedback' && newFeedbackCount > 0 && <span className="admin-nav-count">{newFeedbackCount}</span>}{id === 'orders' && orders.filter((order) => order.paymentStatus === 'paid' && order.status !== 'delivered').length > 0 && <span className="admin-nav-count">{orders.filter((order) => order.paymentStatus === 'paid' && order.status !== 'delivered').length}</span>}</button>)}</nav>
       <div className="admin-sidebar-bottom"><span className="admin-user-avatar">{(user.displayName || user.email || 'A').slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName || 'Administrator'}</strong><small>{user.email}</small></div></div>
     </aside>
     <div className="admin-main">
@@ -346,16 +510,173 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
         </form> : <div className="admin-panel"><div className="admin-list-toolbar"><label className="admin-search"><Search size={16} /><input placeholder="Search products or brands" value={search} onChange={(e) => setSearch(e.target.value)} /></label><span>{visibleProducts.length} products</span></div>
           <div className="admin-product-list">{visibleProducts.map((product) => <article className="admin-product-row" key={product.id}><img src={product.image} alt="" /><div className="admin-product-info"><strong>{product.name}</strong><span>{product.brand} · {getFragranceCategories(product).join(', ')}</span><small>{product.stock > 0 ? `${product.stock} in stock` : 'Out of stock'}</small></div><b>{money(product.price)}</b><span className={`visibility-pill ${(product as Fragrance & { visible?: boolean }).visible === false ? 'hidden' : ''}`}>{(product as Fragrance & { visible?: boolean }).visible === false ? 'Hidden' : 'Live'}</span><button className="outline-button admin-edit-button" onClick={() => editProduct(product)}>Edit</button><button className="icon-button admin-delete-button" onClick={() => void removeProduct(product)} aria-label={`Delete ${product.name}`}><Trash2 size={16} /></button></article>)}{visibleProducts.length === 0 && <p className="admin-empty-note">No matching products. Add a fragrance or import development samples.</p>}</div></div>}
       </section>}
-      {section === 'storefront' && <section className="admin-content"><div className="admin-section-heading"><div><h2>Storefront presentation</h2><p>Update your homepage introduction and promotional announcement.</p></div></div><form className="admin-panel admin-settings-form" onSubmit={saveSettings}>
+      {section === 'orders' && <section className="admin-content"><div className="admin-section-heading"><div><h2>Customer orders</h2><p>Payment-confirmed orders and delivery details, updating live.</p></div><span className="feedback-count">{orders.length} recent</span></div>
+        <div className="admin-orders-list">{orders.map((order) => <article className="admin-order-card" key={order.orderId}>
+          <header className="admin-order-heading"><div><span className="eyebrow">ORDER ID</span><strong>{order.orderId}</strong><small>{order.createdAt?.toDate?.().toLocaleString() ?? 'Date unavailable'}</small></div>
+            <div className="admin-order-controls"><span className={`order-status-pill ${order.paymentStatus === 'paid' ? 'paid' : ''}`}>{order.paymentStatus.replaceAll('_', ' ')}</span>
+              <label className="admin-status-select"><span>Fulfillment</span><select aria-label={`Update status for ${order.orderId}`} value={order.status} disabled={busy || order.paymentStatus !== 'paid'} onChange={(event) => void updateOrderStatus(order.orderId, event.target.value)}>
+                {!['paid_needs_review', 'processing', 'ready_for_dispatch', 'dispatched', 'delivered'].includes(order.status) && <option value={order.status}>{order.status.replaceAll('_', ' ')}</option>}
+                {order.status === 'paid_needs_review' && <option value="paid_needs_review">Needs stock review</option>}
+                {['processing', 'ready_for_dispatch', 'dispatched', 'delivered'].map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}
+              </select></label>
+            </div>
+          </header>
+          <div className="admin-order-details"><section><h3>Customer & delivery</h3><p><strong>{order.customer.name}</strong></p><p>{order.customer.email} · {order.customer.phone}</p><p>{order.customer.address}, {order.customer.city}, {order.customer.region}{order.customer.postalCode ? ` · ${order.customer.postalCode}` : ''}</p></section>
+            <section><h3>Items purchased</h3>{order.items.map((item) => <p className="admin-order-item" key={item.productId}><span>{item.name} · {item.brand} × {item.quantity}</span><strong>{money(item.lineTotalMinor / 100)}</strong></p>)}</section>
+          </div>
+          <footer className="admin-order-total"><span>{order.paymentStatus === 'paid' ? 'Amount paid · GHS' : 'Payment · GHS'}</span><strong>{money(order.totalMinor / 100)}</strong></footer>
+        </article>)}{orders.length === 0 && <div className="admin-panel admin-empty-note">Customer orders will appear here after checkout.</div>}</div>
+      </section>}
+      {section === 'users' && <section className="admin-content"><div className="admin-section-heading"><div><h2>Registered users</h2><p>Customer accounts and saved contact numbers.</p></div><span className="feedback-count">{totalUsers === null ? (usersLoading ? 'Loading…' : '—') : `${totalUsers} total`}</span></div>
+        <div className="admin-users-list">{adminUsers.map((account) => <article className="admin-user-row" key={account.uid}><span className="admin-user-avatar">{(account.name || account.email || 'U').slice(0, 1).toUpperCase()}</span><div><strong>{account.name || 'Name not provided'}</strong><span>{account.email || 'No email'} · {account.phoneNumber || 'No phone number'}</span></div></article>)}
+          {usersLoading && <div className="admin-panel admin-empty-note">Loading customer accounts…</div>}
+          {!usersLoading && adminUsers.length === 0 && <div className="admin-panel admin-empty-note">No registered users were found.</div>}
+        </div>
+        {nextUsersPage && <button className="outline-button admin-load-more" onClick={() => void loadMoreUsers()} disabled={usersLoading}>Load more users</button>}
+      </section>}
+      {section === 'discount-sales' && <section className="admin-content">
+          <div className="admin-section-heading"><div><h2>Discount Sales</h2><p>Choose one live sale type. Storefront prices and cart totals update from published prices.</p></div></div>
+          <form className="discount-sales-form" onSubmit={(event) => void saveDiscountSettings(event)}>
+            <section className="admin-panel discount-mode-card">
+              <div className="admin-panel-heading"><div><h3>All products</h3><span>Apply one percentage discount across every published fragrance.</span></div>
+                <button type="button" className={`discount-switch ${settingsDraft.discountMode === 'all' ? 'enabled' : ''}`} role="switch" aria-checked={settingsDraft.discountMode === 'all'} aria-label="Enable all-products discount" onClick={() => setSettingsDraft((current) => ({ ...current, discountMode: current.discountMode === 'all' ? 'none' : 'all' }))}><span /></button>
+              </div>
+              <label className="discount-percent-control"><span>Discount percentage <strong>{settingsDraft.discountPercentage ?? 15}%</strong></span><input aria-label="All-products discount percentage" type="range" min="1" max="95" step="1" value={settingsDraft.discountPercentage ?? 15} onChange={(event) => setSettingsDraft((current) => ({ ...current, discountPercentage: Number(event.target.value) }))} /><span className="discount-percent-limits"><small>1%</small><small>95%</small></span></label>
+              <p className="discount-hint">Prices are rounded to the nearest whole Ghana cedi after the discount is calculated.</p>
+            </section>
+            <section className="admin-panel discount-mode-card">
+              <div className="admin-panel-heading"><div><h3>Selected products</h3><span>Add published products and set each sale price yourself.</span></div>
+                <button type="button" className={`discount-switch ${settingsDraft.discountMode === 'selected' ? 'enabled' : ''}`} role="switch" aria-checked={settingsDraft.discountMode === 'selected'} aria-label="Enable selected-product discounts" onClick={() => setSettingsDraft((current) => ({ ...current, discountMode: current.discountMode === 'selected' ? 'none' : 'selected' }))}><span /></button>
+              </div>
+              <label className="form-label discount-product-picker">Add a published product<select value="" onChange={(event) => {
+                const product = products.find((item) => item.id === event.target.value);
+                if (!product) return;
+                setSettingsDraft((current) => ({
+                  ...current,
+                  discountProducts: [...(current.discountProducts ?? []), {
+                    productId: product.id,
+                    salePrice: Math.max(1, Math.round(product.price * 0.85)),
+                  }],
+                }));
+              }}>
+                <option value="">Choose a product to add</option>
+                {products.filter((product) => (product as Fragrance & { visible?: boolean }).visible === true
+                  && !(settingsDraft.discountProducts ?? []).some((item) => item.productId === product.id))
+                  .map((product) => <option key={product.id} value={product.id}>{product.name} · {product.brand}</option>)}
+              </select></label>
+              <div className="discount-product-list">
+                {(settingsDraft.discountProducts ?? []).map((item) => {
+                  const product = products.find((entry) => entry.id === item.productId);
+                  return <article className="discount-product-row" key={item.productId}>
+                    <div className="discount-product-copy"><strong>{product?.name || 'Product unavailable'}</strong><span>{product ? `${product.brand} · Current ${money(product.price)}` : 'Remove this entry or republish the product.'}</span></div>
+                    <label className="discount-sale-price">Sale price (GH₵)<input type="number" min="1" max={product ? Math.ceil(product.price) - 1 : undefined} step="1" value={item.salePrice} onChange={(event) => setSettingsDraft((current) => ({
+                      ...current,
+                      discountProducts: (current.discountProducts ?? []).map((entry) => entry.productId === item.productId
+                        ? { ...entry, salePrice: Number(event.target.value) }
+                        : entry),
+                    }))} /></label>
+                    <button type="button" className="icon-button discount-remove" aria-label={`Remove ${product?.name || 'product'} from discounts`} onClick={() => setSettingsDraft((current) => ({
+                      ...current,
+                      discountProducts: (current.discountProducts ?? []).filter((entry) => entry.productId !== item.productId),
+                    }))}><Trash2 size={16} /></button>
+                  </article>;
+                })}
+                {(settingsDraft.discountProducts ?? []).length === 0 && <p className="admin-empty-note">No products added yet. Choose from published products above.</p>}
+              </div>
+            </section>
+            <div className="admin-form-actions"><button type="button" className="outline-button" disabled={busy} onClick={() => setSettingsDraft(settings)}>Discard changes</button><button type="submit" className="primary-button" disabled={busy}><Save size={15} />{busy ? 'Publishing…' : 'Publish discount sale'}</button></div>
+          </form>
+      </section>}
+      {section === 'website-images' && <section className="admin-content">
+        <div className="admin-section-heading"><div><h2>Website Images</h2><p>Customize the homepage header, collection cards, and fragrance finder. Preview your changes before publishing.</p></div></div>
+        <form className="admin-panel admin-website-form" onSubmit={(event) => void saveSettings(event, websiteImageFields)}>
+          <div className="website-image-layout">
+            <div className="website-image-fields">
+              <div className="admin-panel-heading"><h3>Homepage header content</h3></div>
+              <label className="form-label">Header headline<textarea rows={2} maxLength={120} value={settingsDraft.heroTitle ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, heroTitle: event.target.value }))} placeholder={defaultHeroSettings.heroTitle} /><small>Use a new line to control where the headline wraps.</small></label>
+              <label className="form-label">Supporting text<textarea rows={3} maxLength={240} value={settingsDraft.heroText ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, heroText: event.target.value }))} placeholder={defaultHeroSettings.heroText} /></label>
+              <label className="form-label">Button text<input maxLength={40} value={settingsDraft.heroButtonText ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, heroButtonText: event.target.value }))} placeholder={defaultHeroSettings.heroButtonText} /></label>
+              <label className="form-label">Image URL<input type="url" value={settingsDraft.heroImage ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, heroImage: event.target.value }))} placeholder="Paste an image URL or upload an image" /></label>
+              {imageUploadControl('hero', 'Upload header image (max 5 MB)')}
+              <label className="form-label">Small image caption<input maxLength={100} value={settingsDraft.heroCaption ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, heroCaption: event.target.value }))} placeholder={defaultHeroSettings.heroCaption} /></label>
+              <button type="button" className="text-button website-reset-image" onClick={() => setSettingsDraft((current) => ({ ...current, heroImage: '' }))}>Remove header image</button>
+            </div>
+            <section className="website-image-preview-panel" aria-label="Live homepage header preview">
+              <div className="admin-panel-heading"><h3>Live preview</h3><span><Check size={13} /> Updates as you edit</span></div>
+              <div className="hero website-hero-preview">
+                {settingsDraft.heroImage && <LoadedImage key={settingsDraft.heroImage} className="hero-image" src={settingsDraft.heroImage} alt="" />}
+                <div className="hero-shade" />
+                <div className="hero-copy">
+                  <h1>{(settingsDraft.heroTitle || defaultHeroSettings.heroTitle).split('\n').map((line, index) => <Fragment key={`${index}-${line}`}>{index > 0 && <br />}{line}</Fragment>)}</h1>
+                  <p>{settingsDraft.heroText || defaultHeroSettings.heroText}</p>
+                  <span className="light-button">{settingsDraft.heroButtonText || defaultHeroSettings.heroButtonText} <ArrowRight size={14} /></span>
+                </div>
+                <span className="hero-caption">{settingsDraft.heroCaption || defaultHeroSettings.heroCaption}</span>
+              </div>
+              <p className="website-preview-note">The preview is scaled to fit. Changes appear on the storefront after publishing.</p>
+            </section>
+          </div>
+          <div className="website-content-editor">
+            <section className="website-content-group">
+              <div className="admin-panel-heading"><h3>Shop collection page header</h3><span>Edit the header shown at the top of the collection and search page.</span></div>
+              <div className="website-collection-hero-grid">
+                <div>
+                  <label className="form-label">Eyebrow text<input maxLength={70} value={settingsDraft.collectionHeroEyebrow ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, collectionHeroEyebrow: event.target.value }))} placeholder={defaultCollectionHeroSettings.eyebrow} /></label>
+                  <label className="form-label">Headline<input maxLength={100} value={settingsDraft.collectionHeroTitle ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, collectionHeroTitle: event.target.value }))} placeholder={defaultCollectionHeroSettings.title} /></label>
+                  <label className="form-label">Supporting text<textarea rows={3} maxLength={240} value={settingsDraft.collectionHeroText ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, collectionHeroText: event.target.value }))} placeholder={defaultCollectionHeroSettings.text} /></label>
+                  <label className="form-label">Image URL<input type="url" value={settingsDraft.collectionHeroImage ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, collectionHeroImage: event.target.value }))} placeholder="Paste an image URL or upload" /></label>
+                  {imageUploadControl('collectionHero', 'Upload collection page image')}
+                  <label className="form-label">Image caption<input maxLength={100} value={settingsDraft.collectionHeroCaption ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, collectionHeroCaption: event.target.value }))} placeholder={defaultCollectionHeroSettings.caption} /></label>
+                </div>
+                <div className="website-collection-hero-preview">
+                  <div className="collection-hero">
+                    <div className="collection-hero-copy"><div className="eyebrow">{settingsDraft.collectionHeroEyebrow || defaultCollectionHeroSettings.eyebrow}</div><h1>{settingsDraft.collectionHeroTitle || defaultCollectionHeroSettings.title}</h1><p>{settingsDraft.collectionHeroText || defaultCollectionHeroSettings.text}</p><div className="collection-meta"><span>12 curated fragrances</span><i /><span>Accra, Ghana</span></div></div>
+                    <div className="collection-hero-image"><LoadedImage key={settingsDraft.collectionHeroImage || products[0]?.image || defaultCollectionHeroSettings.image} className="" src={settingsDraft.collectionHeroImage || products[0]?.image || defaultCollectionHeroSettings.image} alt="" /><span>{settingsDraft.collectionHeroCaption || defaultCollectionHeroSettings.caption}</span></div>
+                  </div>
+                  <p className="website-preview-note">Preview of the collection page header. Changes appear on the storefront after publishing.</p>
+                </div>
+              </div>
+            </section>
+            <section className="website-content-group">
+              <div className="admin-panel-heading"><h3>Shop by collection</h3><span>Edit the image and copy for each collection card.</span></div>
+              <div className="website-collection-grid">{defaultCollectionSettings.map((item) => {
+                const key = item.id[0].toUpperCase() + item.id.slice(1);
+                const prefix = `collection${key}` as 'collectionMen' | 'collectionWomen' | 'collectionUnisex';
+                const titleField = `${prefix}Title` as 'collectionMenTitle' | 'collectionWomenTitle' | 'collectionUnisexTitle';
+                const subtitleField = `${prefix}Subtitle` as 'collectionMenSubtitle' | 'collectionWomenSubtitle' | 'collectionUnisexSubtitle';
+                const imageField = `${prefix}Image` as 'collectionMenImage' | 'collectionWomenImage' | 'collectionUnisexImage';
+                const image = String(settingsDraft[imageField] || item.image);
+                return <article className="website-collection-editor" key={item.id}>
+                  <div className="website-collection-preview">{image && <LoadedImage key={image} className="" src={image} alt="" />}<span>{settingsDraft[titleField] || item.title}</span></div>
+                  <label className="form-label">Card title<input maxLength={50} value={String(settingsDraft[titleField] ?? '')} onChange={(event) => setSettingsDraft((current) => ({ ...current, [titleField]: event.target.value }))} placeholder={item.title} /></label>
+                  <label className="form-label">Supporting text<input maxLength={100} value={String(settingsDraft[subtitleField] ?? '')} onChange={(event) => setSettingsDraft((current) => ({ ...current, [subtitleField]: event.target.value }))} placeholder={item.subtitle} /></label>
+                  <label className="form-label">Image URL<input type="url" value={String(settingsDraft[imageField] ?? '')} onChange={(event) => setSettingsDraft((current) => ({ ...current, [imageField]: event.target.value }))} placeholder="Paste an image URL or upload" /></label>
+                  {imageUploadControl(prefix, `Upload ${item.category.toLowerCase()} collection image`)}
+                </article>;
+              })}</div>
+            </section>
+            <section className="website-content-group website-finder-editor">
+              <div className="admin-panel-heading"><h3>Fragrance finder feature</h3><span>Edit the promotional text and image.</span></div>
+              <div className="website-finder-grid">
+                <div>
+                  <label className="form-label">Eyebrow text<input maxLength={70} value={settingsDraft.finderEyebrow ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, finderEyebrow: event.target.value }))} placeholder={defaultFinderSettings.eyebrow} /></label>
+                  <label className="form-label">Headline<textarea rows={2} maxLength={120} value={settingsDraft.finderTitle ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, finderTitle: event.target.value }))} placeholder={defaultFinderSettings.title} /><small>Use a new line to control where the headline wraps.</small></label>
+                  <label className="form-label">Supporting text<textarea rows={3} maxLength={240} value={settingsDraft.finderText ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, finderText: event.target.value }))} placeholder={defaultFinderSettings.text} /></label>
+                  <label className="form-label">Button text<input maxLength={50} value={settingsDraft.finderButtonText ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, finderButtonText: event.target.value }))} placeholder={defaultFinderSettings.buttonText} /></label>
+                  <label className="form-label">Image URL<input type="url" value={settingsDraft.finderImage ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, finderImage: event.target.value }))} placeholder="Paste an image URL or upload" /></label>
+                  {imageUploadControl('finder', 'Upload fragrance finder image')}
+                  <label className="form-label">Image caption<input maxLength={100} value={settingsDraft.finderCaption ?? ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, finderCaption: event.target.value }))} placeholder={defaultFinderSettings.caption} /></label>
+                </div>
+                <div className="website-finder-preview">{(settingsDraft.finderImage || defaultFinderSettings.image) && <LoadedImage key={settingsDraft.finderImage || defaultFinderSettings.image} className="" src={settingsDraft.finderImage || defaultFinderSettings.image} alt="" />}<span>{settingsDraft.finderCaption || defaultFinderSettings.caption}</span></div>
+              </div>
+            </section>
+          </div>
+          <div className="admin-form-actions"><button type="button" className="outline-button" onClick={() => setSettingsDraft(settings)} disabled={busy || uploading}>Discard changes</button><button className="primary-button" type="submit" disabled={busy || uploading}><Save size={15} />{busy ? 'Publishing…' : 'Publish website images'}</button></div>
+        </form>
+      </section>}
+      {section === 'storefront' && <section className="admin-content"><div className="admin-section-heading"><div><h2>Storefront presentation</h2><p>Update your promotional announcement and footer introduction.</p></div></div><form className="admin-panel admin-settings-form" onSubmit={(event) => void saveSettings(event, ['announcement', 'footerText'])}>
         <label className="form-label">Announcement bar text<input value={settingsDraft.announcement || ''} onChange={(e) => setSettingsDraft((current) => ({ ...current, announcement: e.target.value }))} placeholder="A short store announcement" /></label>
-        <label className="form-label">Homepage hero heading<input value={settingsDraft.heroTitle || ''} onChange={(e) => setSettingsDraft((current) => ({ ...current, heroTitle: e.target.value }))} placeholder="Discover your signature scent." /></label>
-        <label className="form-label">Homepage supporting text<textarea rows={3} value={settingsDraft.heroText || ''} onChange={(e) => setSettingsDraft((current) => ({ ...current, heroText: e.target.value }))} placeholder="A short brand introduction" /></label>
-        <label className="form-label">Hero image URL<input type="url" value={settingsDraft.heroImage || ''} onChange={(e) => setSettingsDraft((current) => ({ ...current, heroImage: e.target.value }))} placeholder="https://…" /></label>
-        <label className="admin-upload-button"><ImagePlus size={17} />{uploadTarget === 'hero' ? `Uploading… ${uploadProgress}%` : 'Upload homepage hero image (max 5 MB)'}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { void uploadImage(e.currentTarget.files?.[0], 'hero'); e.currentTarget.value = ''; }} disabled={uploading} /></label>
-        {uploadTarget === 'hero' && <div className="admin-upload-status" role="status"><progress max="100" value={uploadProgress} /><span>{uploadProgress}% uploaded</span><button type="button" className="text-button" onClick={() => uploadRequest.current?.abort()}>Cancel upload</button></div>}
-        <label className="form-label">Hero caption<input value={settingsDraft.heroCaption || ''} onChange={(e) => setSettingsDraft((current) => ({ ...current, heroCaption: e.target.value }))} placeholder="THE ART OF SCENT · ACCRA, GHANA" /></label>
         <label className="form-label">Footer introduction<input value={settingsDraft.footerText || ''} onChange={(e) => setSettingsDraft((current) => ({ ...current, footerText: e.target.value }))} placeholder="Exceptional fragrance, thoughtfully found." /></label>
-        {settingsDraft.heroImage && <div className="admin-image-preview"><img src={settingsDraft.heroImage} alt="Homepage hero preview" /><span>Current preview</span></div>}
         <div className="admin-form-actions"><button type="button" className="outline-button" onClick={() => setSettingsDraft(settings)}>Discard changes</button><button className="primary-button" type="submit" disabled={busy || uploading}><Save size={15} />{busy ? 'Publishing…' : 'Publish storefront'}</button></div>
       </form></section>}
       {section === 'feedback' && <section className="admin-content"><div className="admin-section-heading"><div><h2>Customer feedback</h2><p>Messages submitted from the storefront, updating live.</p></div><span className="feedback-count">{newFeedbackCount} new</span></div>
