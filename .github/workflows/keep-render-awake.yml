@@ -1,0 +1,23 @@
+name: Keep Render storefront awake
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping storefront
+        run: |
+          status="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' --max-time 30 https://theperfumenerd.onrender.com/)"
+          echo "Storefront returned HTTP ${status}"
+          case "${status}" in
+            2*|3*) ;;
+            *) exit 1 ;;
+          esac

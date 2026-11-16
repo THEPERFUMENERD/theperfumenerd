@@ -11,6 +11,10 @@ npm.cmd run dev
 
 Create a production bundle with `npm.cmd run build`.
 
+## Render uptime
+
+The GitHub Actions workflow at `.github/workflows/keep-render-awake.yml` requests the Render storefront every 5 minutes. It runs only after the workflow is pushed to the repository's default branch and GitHub Actions/scheduled workflows are enabled. Scheduled workflows are best-effort and GitHub may delay runs, so this free ping can reduce idle sleeps but cannot guarantee uninterrupted availability.
+
 ## Firebase email and Google sign-in
 
 The Account page supports Firebase email/password registration and sign-in, Google popup sign-in, email verification, password reset and sign-out. Authentication state uses Firebase's browser-local persistence.
