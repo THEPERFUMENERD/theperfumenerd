@@ -1,0 +1,39 @@
+{
+  "name": "the-perfume-nerd",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "admin:grant": "node --env-file=.env.local scripts/grant-admin.mjs",
+    "cloudinary:setup": "node scripts/configure-cloudinary-uploads.mjs",
+    "test:rules": "firebase emulators:exec --project demo-perfume-nerd --only firestore,storage \"node --test tests/firebase-rules.test.mjs\"",
+    "test:pos": "firebase emulators:exec --project demo-perfume-nerd --only auth,firestore,functions \"node --test tests/pos-functions.test.mjs\"",
+    "test:catalog-categories": "node --test tests/catalog-categories.test.mjs"
+  },
+  "dependencies": {
+    "firebase": "^11.10.0",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "firebase-admin": "^14.5.1",
+    "firebase-tools": "^15.36.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.14.7",
+    "@opentelemetry/core": "^2.8.0",
+    "glob": "^14.0.2",
+    "minimatch": "^11.0.8",
+    "uuid": "^11.1.1"
+  }
+}
