@@ -56,6 +56,35 @@ function parseMoneyMinor(value: string) {
   return Number.isSafeInteger(minor) ? minor : null;
 }
 
+function getCashSaleErrorMessage(reason: unknown) {
+  const code = typeof reason === 'object' && reason !== null && 'code' in reason
+    ? String(reason.code).replace(/^functions\//, '')
+    : '';
+  const message = reason instanceof Error ? reason.message.trim() : '';
+
+  if (code === 'permission-denied') {
+    return 'The secure POS service denied this account. Confirm administrator access and Firebase rules.';
+  }
+  if (code === 'unauthenticated') {
+    return 'Your administrator session has expired. Sign in again before completing this sale.';
+  }
+  if (code === 'failed-precondition' || code === 'invalid-argument' || code === 'already-exists') {
+    return message || 'The sale details could not be validated. Check the cart and cash received.';
+  }
+  if (code === 'not-found' && message.includes('selected product is no longer available')) {
+    return message;
+  }
+  if (code === 'not-found') {
+    return 'The POS cash-sale service was not found in this Firebase project. Deploy the latest Firebase Functions and confirm the storefront uses the same project.';
+  }
+  if (code === 'unavailable' || code === 'deadline-exceeded') {
+    return 'The POS service could not be reached. Check the connection and Firebase Functions status, then retry.';
+  }
+
+  const diagnostic = [code && `(${code})`, message && ` ${message}`].filter(Boolean).join('');
+  return `The sale could not be confirmed${diagnostic ? ` ${diagnostic}` : ''}. Your cart remains open; retrying will safely reuse its transaction reference.`;
+}
+
 function makeDisplayToken() {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -320,12 +349,7 @@ export function PosTerminal({ user, isAdmin, onBack }: {
       searchRef.current?.focus();
     } catch (reason) {
       console.error('Trusted POS cash sale failed.', reason);
-      const code = typeof reason === 'object' && reason !== null && 'code' in reason ? String(reason.code) : '';
-      setSaleError(code.includes('permission-denied')
-        ? 'The secure POS service denied this account. Confirm administrator access and Firebase rules.'
-        : code.includes('failed-precondition')
-          ? (reason instanceof Error ? reason.message : 'Stock or payment validation failed. Refresh the cart and try again.')
-          : 'The sale could not be confirmed. Your cart remains open; retrying will safely reuse its transaction reference.');
+      setSaleError(getCashSaleErrorMessage(reason));
     } finally {
       setBusy(false);
     }
