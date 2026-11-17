@@ -968,8 +968,12 @@ function AccountPage({ onNavigate, user, loading, authError, authRevision, onAut
       'auth/popup-blocked': 'Your browser blocked the sign-in window. Allow pop-ups and try again.',
       'auth/operation-not-allowed': 'This sign-in method is not enabled in Firebase Authentication yet.',
       'auth/account-exists-with-different-credential': 'An account with this email already uses another sign-in method.',
+      'auth/unauthorized-continue-uri': `Firebase is blocking the verification link for ${window.location.hostname}. Add this hostname in Firebase Console under Authentication → Settings → Authorized domains, then resend the verification email.`,
+      'auth/invalid-continue-uri': `Firebase rejected the verification link for ${window.location.hostname}. Check Authentication → Settings → Authorized domains in Firebase Console.`,
     };
-    setError(errors[code] ?? 'We could not complete sign-in. Please check your details and try again.');
+    setError(errors[code] ?? (mode === 'sign-up'
+      ? 'We could not finish creating your account. If the account was created, sign in and use “Resend verification” to try again.'
+      : 'We could not complete sign-in. Please check your details and try again.'));
   };
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -986,30 +990,39 @@ function AccountPage({ onNavigate, user, loading, authError, authRevision, onAut
         setMessage('If an account exists for that email, a password reset link is on its way.');
       } else if (mode === 'sign-up') {
         const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-        const accountName = name.trim();
-        const phoneNumber = signupPhone.trim();
-        await updateProfile(credential.user, { displayName: accountName });
-        if (!db) throw new Error('Your account was created, but the contact details could not be saved. Please sign in and update your account details.');
-        await setDoc(doc(db, 'users', credential.user.uid), {
-          name: accountName,
-          phoneNumber,
-          address: '',
-          city: '',
-          region: '',
-          postalCode: '',
-          updatedAt: serverTimestamp(),
-        });
         hasPendingVerification.current = true;
         await sendEmailVerification(credential.user, { url: `${window.location.origin}/account?verified=1` });
-        let accountMessage = 'Your account is ready. Check your inbox for the email verification link.';
+        const accountName = name.trim();
+        const phoneNumber = signupPhone.trim();
+        let accountMessage = 'Your verification email has been sent. Check your inbox and spam folder.';
+        let profileSaved = false;
         try {
-          const sms = await orderApi<{ sent: boolean; status: string }>('/api/account/welcome-sms', {});
-          if (!sms.sent && sms.status !== 'already_sent' && sms.status !== 'in_progress') {
+          await updateProfile(credential.user, { displayName: accountName });
+          if (!db) throw new Error('Firebase Firestore is not configured.');
+          await setDoc(doc(db, 'users', credential.user.uid), {
+            name: accountName,
+            phoneNumber,
+            address: '',
+            city: '',
+            region: '',
+            postalCode: '',
+            updatedAt: serverTimestamp(),
+          });
+          profileSaved = true;
+        } catch (profileError) {
+          console.error('The account was created and verification was sent, but profile details could not be saved.', profileError);
+          accountMessage += ' Your account details could not be saved. After verifying, sign in and update them on the Account page.';
+        }
+        if (profileSaved) {
+          try {
+            const sms = await orderApi<{ sent: boolean; status: string }>('/api/account/welcome-sms', {});
+            if (!sms.sent && sms.status !== 'already_sent' && sms.status !== 'in_progress') {
+              accountMessage += ' Your welcome SMS could not be sent. Please check your phone number or contact support.';
+            }
+          } catch (smsError) {
+            console.error('The welcome SMS could not be requested.', smsError);
             accountMessage += ' Your welcome SMS could not be sent. Please check your phone number or contact support.';
           }
-        } catch (smsError) {
-          console.error('The welcome SMS could not be requested.', smsError);
-          accountMessage += ' Your welcome SMS could not be sent. Please check your phone number or contact support.';
         }
         setMessage(accountMessage);
       } else {

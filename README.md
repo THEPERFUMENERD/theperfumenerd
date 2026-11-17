@@ -21,7 +21,7 @@ The Account page supports Firebase email/password registration and sign-in, Goog
 
 1. In Firebase Console, create a **Web app** in your project and enable **Email/Password** and **Google** under Authentication → Sign-in method.
 2. Copy the web app configuration (API key, auth domain, project ID and app ID; optional storage bucket and sender ID) into a `.env.local` file in the project root using the names in `.env.example`.
-3. Add `localhost` and your deployed website hostname in Authentication → Settings → Authorized domains.
+3. Add `localhost` for local development and the exact production hostname in Authentication → Settings → Authorized domains. The current Render storefront hostname is `theperfumenerd.onrender.com`; add any custom domain separately if the storefront uses one. Firebase only accepts verification-email continue URLs on authorized domains.
 4. Restart the Vite development server after editing `.env.local`.
 
 The web app config is intended for browser use. Do not put Firebase service-account JSON, private keys or Admin SDK credentials in `.env.local` or frontend code. `.env.local` is ignored by git.
