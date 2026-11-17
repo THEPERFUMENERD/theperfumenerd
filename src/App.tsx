@@ -1,7 +1,8 @@
 import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
-  ArrowLeft, ArrowRight, Check, ChevronRight, Heart, House,
-  Menu, Minus, Plus, Search, ShoppingBag, SlidersHorizontal, X,
+  ArrowLeft, ArrowRight, Check, ChevronRight, Heart, House, Mail,
+  MapPin, Menu, MessageCircle, Minus, Phone, Plus, Search, ShoppingBag,
+  SlidersHorizontal, X,
 } from 'lucide-react';
 import { getFragranceCategories, money, optimizedProductImage, type Fragrance } from './catalog';
 import { auth, authPersistence, db, isFirebaseConfigured } from './firebase';
@@ -797,55 +798,21 @@ function AboutPage() {
     <header className="info-page-heading">
       <div className="eyebrow">ABOUT US · THE PERFUME NERD</div>
       <h1>A World of Fragrance. A Signature of Your Own.</h1>
-      <p>We believe fragrance is more than something you wear. It is an impression, an identity and a powerful way to express yourself. THE PERFUME NERD was created around a simple idea: everyone deserves access to exceptional fragrances and the confidence that comes with wearing a scent they truly love.</p>
+      <p>Fragrance is personal. We make it easier to explore scents that suit your style, your moments and the impression you want to leave.</p>
     </header>
 
-    <section className="info-section">
-      <div className="eyebrow">WHO WE ARE</div>
-      <h2>Your Destination for Exceptional Fragrances in Ghana</h2>
-      <p>THE PERFUME NERD is a fragrance destination built for individuals who appreciate the art of smelling exceptional. We bring together an appealing selection of fragrances for different personalities, preferences and occasions, making it easier to discover scents that leave a lasting impression.</p>
-      <p>Choosing a perfume is personal. Some fragrances make a statement, some bring back memories, while others quietly become part of your identity. Whether you already know your fragrance preferences or are exploring perfumery for the first time, we are here to make that journey enjoyable.</p>
-      <p>Our focus goes beyond selling perfumes. We are committed to a shopping experience built around quality, confidence, convenience and a genuine appreciation for fragrance.</p>
-      <div className="principle-grid">
-        <div><h3>Our Collection</h3><p>A carefully selected range of fragrances.</p></div>
-        <div><h3>Your Experience</h3><p>A shopping experience designed around you.</p></div>
-        <div><h3>Our Standard</h3><p>Quality and authenticity matter.</p></div>
-        <div><h3>Our Commitment</h3><p>Helping you discover your next signature scent.</p></div>
+    <section className="about-values">
+      <div className="about-values-heading">
+        <div className="eyebrow">A FRAGRANCE DESTINATION IN GHANA</div>
+        <h2>Find the scent that feels like you.</h2>
+        <p>Whether you know what you love or are just beginning to explore, we’re here to make discovering fragrance feel simple and personal.</p>
       </div>
-    </section>
-
-    <section className="info-section journey-section">
-      <div className="eyebrow">OUR JOURNEY</div>
-      <h2>Driven by a Love for Fragrance</h2>
-      <p>Our journey is centred on making fragrance discovery more accessible, enjoyable and rewarding.</p>
-      <div className="journey-grid">
-        <div><span>01</span><h3>A Passion Becomes a Purpose</h3><p>An appreciation for fine fragrances grew into a destination where fragrance lovers can discover scents that reflect their individual style.</p></div>
-        <div><span>02</span><h3>Bringing Great Scents Together</h3><p>We are building a collection for different tastes, personalities and occasions.</p></div>
-        <div><span>03</span><h3>More Than Just a Purchase</h3><p>We aim to build meaningful relationships and make every fragrance-shopping experience worthwhile.</p></div>
-        <div><span>04</span><h3>A Lasting Fragrance Experience</h3><p>We plan to keep growing our collection and become a recognised fragrance destination in Ghana.</p></div>
+      <div className="about-value-grid">
+        <article><span>01</span><h3>A considered collection</h3><p>Explore scents across styles, notes and occasions.</p></article>
+        <article><span>02</span><h3>Your experience, your way</h3><p>Take your time and find a fragrance that fits you.</p></article>
+        <article><span>03</span><h3>Made for discovery</h3><p>Enjoy the details, the feeling and the story of a great scent.</p></article>
       </div>
-      <blockquote>“A fragrance may introduce you before you speak and remain memorable long after you leave.”<cite>THE PERFUME NERD</cite></blockquote>
-      <p className="about-location">Ghana · Made for Fragrance Enthusiasts</p>
-    </section>
-
-    <section className="info-section">
-      <div className="eyebrow">WHAT DRIVES US</div>
-      <h2>The Principles Behind Every Experience</h2>
-      <div className="principle-grid">
-        <div><h3>Quality Comes First</h3><p>We carefully consider the quality of the fragrances we offer.</p></div>
-        <div><h3>A Considered Collection</h3><p>We value a range of scent profiles, fragrance families and styles for different preferences.</p></div>
-        <div><h3>Your Satisfaction Matters</h3><p>We want every interaction, from discovery to delivery, to feel smooth and worthwhile.</p></div>
-        <div><h3>Convenience Without Compromise</h3><p>Discovering, selecting and receiving your next scent should feel effortless.</p></div>
-      </div>
-    </section>
-
-    <section className="info-section about-promise">
-      <div className="eyebrow">OUR PROMISE</div>
-      <h2>Exceptional Fragrance. Confidence in Every Bottle.</h2>
-      <p>Trust is just as important as the fragrance itself. We are committed to maintaining high standards in the products we offer and the experience we deliver.</p>
-      <p>Every customer deserves clarity, confidence and genuine value. We are a destination for people who appreciate the details behind a great scent, the emotion it carries and the impression it leaves.</p>
-      <strong>Discover your scent. Define your presence.</strong>
-      <span>THE PERFUME NERD</span>
+      <blockquote className="about-quote">“Discover your scent. Define your presence.”<cite>THE PERFUME NERD · GHANA</cite></blockquote>
     </section>
   </article>;
 }
@@ -855,16 +822,16 @@ function ContactPage({ form, onChange, sending, error, onSubmit }: ContactPagePr
     <header className="info-page-heading">
       <div className="eyebrow">GET IN TOUCH</div>
       <h1>We'd Love to Hear from You</h1>
-      <p>Have a question, need help choosing a scent, or want to place a bulk order? Our friendly team is ready to help.</p>
+      <p>Questions about a fragrance or an order? Choose the way that works best for you.</p>
     </header>
     <div className="contact-details-grid">
-      <article className="contact-card"><span className="eyebrow">CALL US</span><a href="tel:+233554757454">+233 (0) 554757454</a><p>Monday to Saturday, 8:00 AM to 8:00 PM</p><a className="contact-action" href="tel:+233554757454">Call now</a></article>
-      <article className="contact-card"><span className="eyebrow">EMAIL US</span><a href="mailto:perfumenerd6@gmail.com">perfumenerd6@gmail.com</a><p>We reply within 24 hours.</p><a className="contact-action" href="mailto:perfumenerd6@gmail.com">Send email</a></article>
-      <article className="contact-card"><span className="eyebrow">VISIT US</span><strong>Spintex, Accra</strong><p>Adjacent to Pizzaman Chickenman. Open daily, 8:00 AM to 8:00 PM.</p><a className="contact-action" href="https://maps.google.com/?q=5.632300979777558,-0.09979222271003226" target="_blank" rel="noopener noreferrer">Get directions</a></article>
+      <article className="contact-card"><span className="contact-card-icon"><Phone size={19} /></span><span className="eyebrow">CALL US</span><a href="tel:+233554757454">+233 (0) 554757454</a><p>Mon–Sat · 8:00 AM–8:00 PM</p><a className="contact-action" href="tel:+233554757454">Call now <ArrowRight size={14} /></a></article>
+      <article className="contact-card"><span className="contact-card-icon"><Mail size={19} /></span><span className="eyebrow">EMAIL US</span><a href="mailto:perfumenerd6@gmail.com">perfumenerd6@gmail.com</a><p>We reply within 24 hours.</p><a className="contact-action" href="mailto:perfumenerd6@gmail.com">Send email <ArrowRight size={14} /></a></article>
+      <article className="contact-card"><span className="contact-card-icon"><MapPin size={19} /></span><span className="eyebrow">VISIT US</span><strong>Spintex, Accra</strong><p>Adjacent to Pizzaman Chickenman.</p><a className="contact-action" href="https://maps.google.com/?q=5.632300979777558,-0.09979222271003226" target="_blank" rel="noopener noreferrer">Get directions <ArrowRight size={14} /></a></article>
+      <WhatsAppCard />
     </div>
     <div className="contact-map"><iframe title="The Perfume Nerd location in Spintex, Accra" src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3970.5563897532543!2d-0.09979222271003226!3d5.632300979777558!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0xfdf85f121f3d1d3%3A0xc9eaa7ea7aa3b356!2sThe%20Perfume%20Nerd!5e0!3m2!1sen!2sgh!4v1794914247343!5m2!1sen!2sgh" loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /></div>
     <MessageForm form={form} onChange={onChange} sending={sending} error={error} onSubmit={onSubmit} />
-    <WhatsAppCard />
   </section>;
 }
 
@@ -873,11 +840,11 @@ function SupportPage({ form, onChange, sending, error, onSubmit }: ContactPagePr
     <header className="info-page-heading">
       <div className="eyebrow">HELP &amp; SUPPORT</div>
       <h1>How Can We Help?</h1>
-      <p>Contact our team about an order, a product or choosing your next fragrance.</p>
+      <p>Need help with an order or choosing a scent? We’re just a message away.</p>
     </header>
     <div className="contact-details-grid support-details-grid">
-      <article className="contact-card"><span className="eyebrow">CALL US</span><a href="tel:+233554757454">+233 (0) 554757454</a><p>Monday to Saturday, 8:00 AM to 8:00 PM</p><a className="contact-action" href="tel:+233554757454">Call now</a></article>
-      <article className="contact-card"><span className="eyebrow">EMAIL US</span><a href="mailto:perfumenerd6@gmail.com">perfumenerd6@gmail.com</a><p>We reply within 24 hours.</p><a className="contact-action" href="mailto:perfumenerd6@gmail.com">Send email</a></article>
+      <article className="contact-card"><span className="contact-card-icon"><Phone size={19} /></span><span className="eyebrow">CALL US</span><a href="tel:+233554757454">+233 (0) 554757454</a><p>Mon–Sat · 8:00 AM–8:00 PM</p><a className="contact-action" href="tel:+233554757454">Call now <ArrowRight size={14} /></a></article>
+      <article className="contact-card"><span className="contact-card-icon"><Mail size={19} /></span><span className="eyebrow">EMAIL US</span><a href="mailto:perfumenerd6@gmail.com">perfumenerd6@gmail.com</a><p>We reply within 24 hours.</p><a className="contact-action" href="mailto:perfumenerd6@gmail.com">Send email <ArrowRight size={14} /></a></article>
       <WhatsAppCard />
     </div>
     <MessageForm form={form} onChange={onChange} sending={sending} error={error} onSubmit={onSubmit} />
@@ -905,7 +872,7 @@ function MessageForm({ form, onChange, sending, error, onSubmit }: ContactPagePr
 
 function WhatsAppCard() {
   return <a className="contact-card whatsapp-card" href="https://wa.me/233554757454" target="_blank" rel="noopener noreferrer">
-    <span className="eyebrow">WHATSAPP</span><strong>Chat with us</strong><p>Fastest response, usually within minutes.</p><span className="contact-action">Chat on WhatsApp</span>
+    <span className="contact-card-icon"><MessageCircle size={19} /></span><span className="eyebrow">WHATSAPP</span><strong>Chat with us</strong><p>Fastest way to reach our team.</p><span className="contact-action">Chat on WhatsApp <ArrowRight size={14} /></span>
   </a>;
 }
 
