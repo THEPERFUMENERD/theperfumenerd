@@ -332,7 +332,7 @@ export function PosTerminal({ user, isAdmin, onBack }: {
   };
 
   const customerDisplayUrl = displayToken.current
-    ? `${window.location.origin}/pos-display/${displayToken.current}` : '';
+    ? `${window.location.origin}/?pos-display=${encodeURIComponent(displayToken.current)}` : '';
 
   if (!user || !isAdmin) return <main className="admin-guard"><section className="admin-access-card">
     <span className="eyebrow">THE PERFUME NERD · POINT OF SALE</span>

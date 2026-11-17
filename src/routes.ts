@@ -18,3 +18,17 @@ export function getStorefrontPath(pathname: string, search = ''): string {
     ? '/orders'
     : pathname;
 }
+
+export function getPosCustomerDisplaySessionId(pathname: string, search = ''): string | null {
+  const searchParams = new URLSearchParams(search);
+  const querySessionId = searchParams.get('pos-display');
+  if (querySessionId) return querySessionId;
+
+  const pathPrefix = '/pos-display/';
+  if (!pathname.startsWith(pathPrefix)) return null;
+  try {
+    return decodeURIComponent(pathname.slice(pathPrefix.length)) || null;
+  } catch {
+    return null;
+  }
+}

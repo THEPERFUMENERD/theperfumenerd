@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { getStorefrontPath, getStorefrontTab } from '../src/routes.ts';
+import { getPosCustomerDisplaySessionId, getStorefrontPath, getStorefrontTab } from '../src/routes.ts';
 
 test('Paystack returns at storefront root open the Orders view', () => {
   assert.equal(getStorefrontTab('/', '?trxref=TPN-20261117-ORDER&reference=TPN-20261117-ORDER'), 'Orders');
@@ -23,4 +23,11 @@ test('about, contact and support pages resolve from direct routes', () => {
   assert.equal(getStorefrontTab('/about', ''), 'About');
   assert.equal(getStorefrontTab('/contact', ''), 'Contact');
   assert.equal(getStorefrontTab('/support', ''), 'Support');
+});
+
+test('POS customer display opens from the root query route and legacy deep links', () => {
+  const sessionId = 'a'.repeat(64);
+  assert.equal(getPosCustomerDisplaySessionId('/', `?pos-display=${sessionId}`), sessionId);
+  assert.equal(getPosCustomerDisplaySessionId(`/pos-display/${sessionId}`), sessionId);
+  assert.equal(getPosCustomerDisplaySessionId('/account', ''), null);
 });

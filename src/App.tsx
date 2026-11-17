@@ -9,7 +9,7 @@ import { auth, authPersistence, db, isFirebaseConfigured } from './firebase';
 import { LoadedImage } from './LoadedImage';
 import { applyStorefrontDiscounts } from './discounts';
 import { orderApi } from './order-api';
-import { getStorefrontPath, getStorefrontTab } from './routes';
+import { getPosCustomerDisplaySessionId, getStorefrontPath, getStorefrontTab } from './routes';
 import {
   createUserWithEmailAndPassword,
   GoogleAuthProvider,
@@ -47,11 +47,11 @@ const isValidPhoneNumber = (value: string) => {
   const compact = value.trim().replace(/[\s()+.-]/g, '');
   return /^0\d{9}$/.test(compact) || /^233\d{9}$/.test(compact) || /^\d{8,15}$/.test(compact);
 };
-const getAdminView = (pathname: string): AdminView => pathname === '/admin'
+const getAdminView = (pathname: string, search = ''): AdminView => pathname === '/admin'
   ? 'dashboard'
   : pathname === '/admin/pos'
     ? 'pos'
-    : pathname.startsWith('/pos-display/')
+    : getPosCustomerDisplaySessionId(pathname, search)
       ? 'customer-display'
       : null;
 const readStored = <T,>(key: string, fallback: T): T => {
@@ -64,7 +64,7 @@ const readStored = <T,>(key: string, fallback: T): T => {
 };
 
 function App() {
-  const [adminView, setAdminView] = useState<AdminView>(() => getAdminView(location.pathname));
+  const [adminView, setAdminView] = useState<AdminView>(() => getAdminView(location.pathname, location.search));
   const isAdminRoute = adminView !== null;
   const [tab, setTab] = useState<Tab>(() => getStorefrontTab(location.pathname, location.search));
   const [cart, setCart] = useState<CartLine[]>(() => readStored('tpn-cart', []));
@@ -187,7 +187,7 @@ function App() {
   }, [user]);
   useEffect(() => {
     const onPopState = () => {
-      setAdminView(getAdminView(location.pathname));
+      setAdminView(getAdminView(location.pathname, location.search));
       setTab(getStorefrontTab(location.pathname, location.search));
     };
     window.addEventListener('popstate', onPopState);
@@ -483,7 +483,7 @@ function App() {
           </>}</section>}
         {adminView === 'dashboard' && <Suspense fallback={<div className="admin-guard"><p>Opening administrator workspace…</p></div>}><AdminPortal user={user} loading={authLoading} isAdmin={isAdmin} claimLoading={adminClaimLoading} claimError={adminClaimError} onPos={navigatePos} onSignIn={() => navigate('Account')} /></Suspense>}
         {adminView === 'pos' && <Suspense fallback={<div className="admin-guard"><p>Opening the point of sale…</p></div>}><PosTerminal user={user} isAdmin={isAdmin && !adminClaimLoading} onBack={navigateAdmin} /></Suspense>}
-        {adminView === 'customer-display' && <Suspense fallback={<div className="pos-customer-screen"><p>Connecting to the customer display…</p></div>}><PosCustomerDisplay sessionId={decodeURIComponent(location.pathname.slice('/pos-display/'.length))} /></Suspense>}
+        {adminView === 'customer-display' && <Suspense fallback={<div className="pos-customer-screen"><p>Connecting to the customer display…</p></div>}><PosCustomerDisplay sessionId={getPosCustomerDisplaySessionId(location.pathname, location.search) ?? ''} /></Suspense>}
         {storefrontLoading && !isAdminRoute && tab === 'Home' && <p className="storefront-loading">Loading the fragrance collection…</p>}
         {storefrontError && !isAdminRoute && <p className="storefront-error" role="status">{storefrontError}</p>}
       </main>
