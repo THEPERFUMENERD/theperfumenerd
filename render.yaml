@@ -15,6 +15,10 @@ services:
         sync: false
       - key: PAYSTACK_SECRET_KEY
         sync: false
+      - key: MNOTIFY_API_KEY
+        sync: false
+      - key: MNOTIFY_SENDER_ID
+        value: PERFUMENERD
       - key: PUBLIC_STORE_URL
         value: https://theperfumenerd.onrender.com
       - key: ALLOWED_ORIGINS

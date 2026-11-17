@@ -1,0 +1,69 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { normalizeSmsRecipient, sendMnotifySms } from '../functions/mnotify.js';
+
+test('normalizes Ghana mobile numbers for mNotify', () => {
+  assert.equal(normalizeSmsRecipient('024 123 4567'), '233241234567');
+  assert.equal(normalizeSmsRecipient('+233 24 123 4567'), '233241234567');
+  assert.equal(normalizeSmsRecipient('233241234567'), '233241234567');
+  assert.throws(() => normalizeSmsRecipient('123'), /valid mobile number/i);
+});
+
+test('sends an SMS using the configured sender and server API key', async () => {
+  let requestUrl;
+  let requestOptions;
+  const result = await sendMnotifySms({
+    phone: '024 123 4567',
+    message: 'Welcome.',
+    apiKey: 'server-test-key',
+    fetchImpl: async (url, options) => {
+      requestUrl = url;
+      requestOptions = options;
+      return { ok: true, status: 200, json: async () => ({ status: 'success' }) };
+    },
+  });
+
+  assert.match(requestUrl, /^https:\/\/api\.mnotify\.com\/api\/sms\/quick\?key=server-test-key$/);
+  assert.equal(requestOptions.method, 'POST');
+  assert.deepEqual(JSON.parse(requestOptions.body), {
+    recipient: ['233241234567'],
+    sender: 'PERFUMENERD',
+    message: 'Welcome.',
+    is_schedule: false,
+    schedule_date: '',
+  });
+  assert.deepEqual(result, { status: 'success' });
+});
+
+test('does not send with a missing key or invalid sender ID', async () => {
+  await assert.rejects(sendMnotifySms({
+    phone: '0241234567',
+    message: 'Welcome.',
+    apiKey: '',
+    fetchImpl: async () => { throw new Error('fetch should not run'); },
+  }), /not configured/i);
+
+  await assert.rejects(sendMnotifySms({
+    phone: '0241234567',
+    message: 'Welcome.',
+    apiKey: 'server-test-key',
+    senderId: 'PERFUME NERD STORE',
+    fetchImpl: async () => { throw new Error('fetch should not run'); },
+  }), /sender ID/i);
+});
+
+test('reports mNotify HTTP and provider failures', async () => {
+  await assert.rejects(sendMnotifySms({
+    phone: '0241234567',
+    message: 'Welcome.',
+    apiKey: 'server-test-key',
+    fetchImpl: async () => ({ ok: false, status: 503, json: async () => null }),
+  }), /HTTP 503/);
+
+  await assert.rejects(sendMnotifySms({
+    phone: '0241234567',
+    message: 'Welcome.',
+    apiKey: 'server-test-key',
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ status: 'failure' }) }),
+  }), /HTTP 200/);
+});

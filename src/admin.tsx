@@ -457,8 +457,11 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
     setBusy(true);
     clearAlerts();
     try {
-      await orderApi('/api/admin/orders/status', { orderId, status });
+      const result = await orderApi<{ smsStatus: string }>('/api/admin/orders/status', { orderId, status });
       setMessage(`Order ${orderId} updated.`);
+      if (result.smsStatus === 'failed') {
+        setError('The order status was updated, but its SMS notification could not be sent.');
+      }
     } catch (reason) {
       fail(reason, 'Order status could not be updated. Confirm the order is paid and try again.');
     } finally {
@@ -553,7 +556,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
           <article><span><PackageX size={16} /> LOW STOCK</span><strong>{lowStockProducts.length}</strong><small>Visible products with 3 or fewer</small></article>
           <article><span><PackageX size={16} /> OUT OF STOCK</span><strong>{outOfStockCount}</strong><small>Visible items unavailable to buy</small></article>
           <article><span><MessageSquare size={16} /> NEW FEEDBACK</span><strong>{newFeedbackCount}</strong><small>Messages awaiting review</small></article>
-          <article><span><Users size={16} /> CUSTOMERS</span><strong>{totalUsers === null ? (usersLoading ? '…' : '—') : totalUsers}</strong><small>Registered accounts</small></article>
+          <article><span><Users size={16} /> CUSTOMERS</span><strong>{totalUsers === null ? (usersLoading ? '…' : 'Not available') : totalUsers}</strong><small>Registered accounts</small></article>
         </div>
         <div className="admin-overview-main-grid">
           <section className="admin-panel admin-revenue-panel">
@@ -562,7 +565,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
               {revenueHistory.map(({ date, revenueMinor }) => <div className="admin-revenue-day" key={date} title={`${formatOrderDay(date)}: ${money(revenueMinor / 100)}`}>
                 <div className="admin-revenue-bar-track"><span className={revenueMinor > 0 ? 'has-revenue' : ''} style={{ height: `${revenueBarHeight(revenueMinor, maxDailyRevenue)}%` }} /></div>
                 <small>{new Intl.DateTimeFormat(undefined, { timeZone: 'Africa/Accra', weekday: 'short' }).format(new Date(`${date}T12:00:00Z`))}</small>
-                <strong>{revenueMinor ? money(revenueMinor / 100) : '—'}</strong>
+                <strong>{money(revenueMinor / 100)}</strong>
               </div>)}
             </div>
             <p className="admin-chart-caption">Revenue counts successful online payments and completed POS cash sales only.</p>
@@ -643,18 +646,18 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
           </section>
         </div>}
         <div className="admin-order-print-sheet" aria-hidden="true">
-          <h1>THE PERFUME NERD — Daily Orders</h1>
+          <h1>THE PERFUME NERD | Daily Orders</h1>
           <h2>{formatOrderDay(printDate)}</h2>
           <p>{selectedPrintOrders.length} {selectedPrintOrders.length === 1 ? 'order' : 'orders'}</p>
           {selectedPrintOrders.map((order) => <article className="admin-order-print-card" key={order.orderId}>
             <header><div><strong>{formatOrderId(order.orderId)}</strong><small>{formatOrderDateTime(order.createdAt)}</small></div><strong>{money(order.totalMinor / 100)}</strong></header>
             <p><strong>{order.customer.name}</strong><br />{order.customer.email} · {order.customer.phone}<br />{order.customer.address}, {order.customer.city}, {order.customer.region}{order.customer.postalCode ? ` · ${order.customer.postalCode}` : ''}</p>
-            <ul>{order.items.map((item) => <li key={item.productId}>{item.name} · {item.brand} × {item.quantity} — {money(item.lineTotalMinor / 100)}</li>)}</ul>
+            <ul>{order.items.map((item) => <li key={item.productId}>{item.name} · {item.brand} × {item.quantity} · {money(item.lineTotalMinor / 100)}</li>)}</ul>
             <footer>{order.paymentStatus.replaceAll('_', ' ')} · {order.status.replaceAll('_', ' ')}</footer>
           </article>)}
         </div>
       </section>}
-      {section === 'users' && <section className="admin-content"><div className="admin-section-heading"><div><h2>Registered users</h2><p>Customer accounts and saved contact numbers.</p></div><span className="feedback-count">{totalUsers === null ? (usersLoading ? 'Loading…' : '—') : `${totalUsers} total`}</span></div>
+      {section === 'users' && <section className="admin-content"><div className="admin-section-heading"><div><h2>Registered users</h2><p>Customer accounts and saved contact numbers.</p></div><span className="feedback-count">{totalUsers === null ? (usersLoading ? 'Loading…' : 'Not available') : `${totalUsers} total`}</span></div>
         <div className="admin-users-list">{adminUsers.map((account) => <article className="admin-user-row" key={account.uid}><span className="admin-user-avatar">{(account.name || account.email || 'U').slice(0, 1).toUpperCase()}</span><div><strong>{account.name || 'Name not provided'}</strong><span>{account.email || 'No email'} · {account.phoneNumber || 'No phone number'}</span></div></article>)}
           {usersLoading && <div className="admin-panel admin-empty-note">Loading customer accounts…</div>}
           {!usersLoading && adminUsers.length === 0 && <div className="admin-panel admin-empty-note">No registered users were found.</div>}

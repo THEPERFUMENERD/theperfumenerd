@@ -18,3 +18,9 @@ test('normal storefront routes keep their existing tab behavior', () => {
   assert.equal(getStorefrontTab('/orders', ''), 'Orders');
   assert.equal(getStorefrontPath('/account', '?verified=1'), '/account');
 });
+
+test('about, contact and support pages resolve from direct routes', () => {
+  assert.equal(getStorefrontTab('/about', ''), 'About');
+  assert.equal(getStorefrontTab('/contact', ''), 'Contact');
+  assert.equal(getStorefrontTab('/support', ''), 'Support');
+});

@@ -3,6 +3,7 @@ import { getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';
+import { normalizeSmsRecipient, sendMnotifySms } from './mnotify.js';
 
 if (getApps().length === 0) initializeApp();
 const db = getFirestore();
@@ -83,6 +84,11 @@ export function validateOnlineOrder(data) {
     region: typeof data.customer.region === 'string' ? data.customer.region.trim() : '',
     postalCode: typeof data.customer.postalCode === 'string' ? data.customer.postalCode.trim() : '',
   };
+  try {
+    normalizeSmsRecipient(customer.phone);
+  } catch {
+    throw new HttpsError('invalid-argument', 'Enter a valid mobile number, including its country code.');
+  }
   if (customer.name.length < 2 || customer.name.length > 100
     || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email) || customer.email.length > 254
     || customer.phone.length < 7 || customer.phone.length > 32
@@ -123,9 +129,60 @@ async function paystackRequest(path, secret, body) {
   return result.data;
 }
 
+const staleSmsClaimMs = 10 * 60 * 1000;
+const fulfillmentSmsDetails = {
+  processing: ['Processing', 'We are preparing it for dispatch.'],
+  ready_for_dispatch: ['Ready to dispatch', 'Your order is packed and ready to be sent.'],
+  dispatched: ['Dispatched', 'Your order is on its way.'],
+  delivered: ['Delivered', 'We hope you enjoy your fragrance.'],
+};
+
+function isActiveSmsClaim(claim) {
+  if (claim?.status !== 'sending') return false;
+  const updatedAt = claim.updatedAt?.toDate?.();
+  return updatedAt instanceof Date && Date.now() - updatedAt.getTime() < staleSmsClaimMs;
+}
+
+async function sendOrderSms(orderRef, notificationKey, phone, message) {
+  const claimField = `smsNotifications.${notificationKey}`;
+  let claimed = false;
+  try {
+    const claimResult = await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(orderRef);
+      if (!snapshot.exists) return { status: 'failed' };
+      const current = snapshot.data().smsNotifications?.[notificationKey];
+      if (current?.status === 'sent') return { status: 'already_sent' };
+      if (isActiveSmsClaim(current)) return { status: 'in_progress' };
+      transaction.update(orderRef, {
+        [claimField]: { status: 'sending', updatedAt: FieldValue.serverTimestamp() },
+      });
+      return { status: 'claimed' };
+    });
+    if (claimResult.status !== 'claimed') return claimResult.status;
+    claimed = true;
+    await sendMnotifySms({ phone, message });
+    await orderRef.update({
+      [claimField]: { status: 'sent', updatedAt: FieldValue.serverTimestamp() },
+    });
+    return 'sent';
+  } catch (error) {
+    if (claimed) {
+      try {
+        await orderRef.update({
+          [claimField]: { status: 'failed', updatedAt: FieldValue.serverTimestamp() },
+        });
+      } catch (recordError) {
+        console.error('Could not record failed order SMS delivery.', recordError);
+      }
+    }
+    console.error('Order SMS delivery failed.', error instanceof Error ? error.message : 'Unknown SMS error.');
+    return 'failed';
+  }
+}
+
 async function recordSuccessfulOnlinePayment(reference, payment) {
   const orderRef = db.collection('orders').doc(reference);
-  return db.runTransaction(async (transaction) => {
+  const result = await db.runTransaction(async (transaction) => {
     const orderSnapshot = await transaction.get(orderRef);
     if (!orderSnapshot.exists) throw new HttpsError('not-found', 'The order could not be found.');
     const order = orderSnapshot.data();
@@ -133,7 +190,15 @@ async function recordSuccessfulOnlinePayment(reference, payment) {
       || payment.amount !== order.totalMinor) {
       throw new HttpsError('failed-precondition', 'The confirmed payment does not match this order.');
     }
-    if (order.paymentStatus === 'paid') return { orderId: order.orderId, status: order.status };
+    if (order.paymentStatus === 'paid') {
+      return {
+        orderId: order.orderId,
+        status: order.status,
+        phone: order.customer?.phone,
+        totalMinor: order.totalMinor,
+        shouldNotify: order.smsNotifications?.order_received?.status !== 'sent',
+      };
+    }
     if (order.paymentStatus !== 'pending') {
       throw new HttpsError('failed-precondition', 'This order is no longer awaiting payment.');
     }
@@ -175,8 +240,20 @@ async function recordSuccessfulOnlinePayment(reference, payment) {
       paidAt: now,
       updatedAt: now,
     });
-    return { orderId: order.orderId, status: hasStock ? 'processing' : 'paid_needs_review' };
+    return {
+      orderId: order.orderId,
+      status: hasStock ? 'processing' : 'paid_needs_review',
+      phone: order.customer?.phone,
+      totalMinor: order.totalMinor,
+      shouldNotify: true,
+    };
   });
+  if (!result.shouldNotify) return { orderId: result.orderId, status: result.status, smsStatus: 'already_sent' };
+  const message = result.status === 'processing'
+    ? `THE PERFUME NERD: We received and confirmed your order ${result.orderId} for GH₵${(result.totalMinor / 100).toFixed(2)}. We are preparing it for dispatch.`
+    : `THE PERFUME NERD: We received your order ${result.orderId} and confirmed payment. Our team is checking availability and will update you shortly.`;
+  const smsStatus = await sendOrderSms(orderRef, 'order_received', result.phone, message);
+  return { orderId: result.orderId, status: result.status, smsStatus };
 }
 
 export const initializePaystackOrder = onCall(async (request) => {
@@ -366,6 +443,62 @@ export const paystackWebhook = onRequest(async (request, response) => {
   response.status(result.statusCode).send(result.body);
 });
 
+export const sendWelcomeSms = onCall(async (request) => {
+  if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in to send the welcome message.');
+  const profileRef = db.collection('users').doc(request.auth.uid);
+  const notificationRef = db.collection('smsNotifications').doc(`welcome_${request.auth.uid}`);
+  let phone = '';
+  let claimed = false;
+  try {
+    const claimResult = await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(profileRef);
+      const notificationSnapshot = await transaction.get(notificationRef);
+      if (!snapshot.exists) throw new HttpsError('failed-precondition', 'Save your account phone number before requesting a welcome message.');
+      const profile = snapshot.data();
+      const existing = notificationSnapshot.exists ? notificationSnapshot.data() : {};
+      if (existing?.status === 'sent') return { status: 'already_sent' };
+      if (isActiveSmsClaim(existing)) return { status: 'in_progress' };
+      if (typeof profile.phoneNumber !== 'string' || !profile.phoneNumber.trim()) {
+        throw new HttpsError('failed-precondition', 'Add a phone number to your account before requesting a welcome message.');
+      }
+      phone = profile.phoneNumber.trim();
+      transaction.set(notificationRef, {
+        userId: request.auth.uid,
+        status: 'sending',
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return { status: 'claimed' };
+    });
+    if (claimResult.status !== 'claimed') {
+      return { sent: claimResult.status === 'already_sent', status: claimResult.status };
+    }
+    claimed = true;
+    await sendMnotifySms({
+      phone,
+      message: 'Welcome to THE PERFUME NERD. Your account is ready. We look forward to helping you find your next signature scent.',
+    });
+    await notificationRef.update({
+      status: 'sent',
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return { sent: true, status: 'sent' };
+  } catch (error) {
+    if (claimed) {
+      try {
+        await notificationRef.update({
+          status: 'failed',
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      } catch (recordError) {
+        console.error('Could not record failed welcome SMS delivery.', recordError);
+      }
+    }
+    if (error instanceof HttpsError) throw error;
+    console.error('Welcome SMS delivery failed.', error instanceof Error ? error.message : 'Unknown SMS error.');
+    return { sent: false, status: 'failed' };
+  }
+});
+
 export const updateOnlineOrderStatus = onCall(async (request) => {
   if (!isAdministrator(request.auth)) {
     throw new HttpsError('permission-denied', 'Administrator access is required.');
@@ -377,19 +510,37 @@ export const updateOnlineOrderStatus = onCall(async (request) => {
     throw new HttpsError('invalid-argument', 'Choose a valid order and fulfillment status.');
   }
   const orderRef = db.collection('orders').doc(orderId);
-  await db.runTransaction(async (transaction) => {
+  const update = await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(orderRef);
     if (!snapshot.exists) throw new HttpsError('not-found', 'The order could not be found.');
-    if (snapshot.data().paymentStatus !== 'paid') {
+    const order = snapshot.data();
+    if (order.paymentStatus !== 'paid') {
       throw new HttpsError('failed-precondition', 'Only paid orders can be updated.');
+    }
+    if (order.status === status) {
+      return {
+        changed: false,
+        shouldNotify: order.smsNotifications?.[`fulfillment_${status}`]?.status !== 'sent',
+        phone: order.customer?.phone,
+        orderId: order.orderId,
+      };
     }
     transaction.update(orderRef, {
       status,
       updatedAt: FieldValue.serverTimestamp(),
       fulfillmentUpdatedBy: request.auth.uid,
     });
+    return { changed: true, shouldNotify: true, phone: order.customer?.phone, orderId: order.orderId };
   });
-  return { orderId, status };
+  if (!update.shouldNotify) return { orderId, status, smsStatus: 'already_sent' };
+  const [statusLabel, detail] = fulfillmentSmsDetails[status];
+  const smsStatus = await sendOrderSms(
+    orderRef,
+    `fulfillment_${status}`,
+    update.phone,
+    `THE PERFUME NERD: Order ${update.orderId} update: ${statusLabel}. ${detail}`,
+  );
+  return { orderId, status, smsStatus };
 });
 
 export const listAdminUsers = onCall(async (request) => {

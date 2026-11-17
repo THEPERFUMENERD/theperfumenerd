@@ -52,6 +52,10 @@ test('checkout rejects repeated lines, invalid quantities and incomplete deliver
     customer: { ...customer, address: '' },
     items: [{ productId: 'signature', quantity: 1 }],
   }), { code: 'invalid-argument' });
+  assert.throws(() => validateOnlineOrder({
+    customer: { ...customer, phone: 'not a phone number' },
+    items: [{ productId: 'signature', quantity: 1 }],
+  }), { code: 'invalid-argument' });
 });
 
 test('server prices active all-product discounts in whole Ghana cedis', () => {

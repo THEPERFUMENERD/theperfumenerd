@@ -1,7 +1,7 @@
 import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   ArrowLeft, ArrowRight, Check, ChevronRight, Heart, House,
-  Menu, Minus, Plus, Search, ShoppingBag, SlidersHorizontal, Sparkles, X,
+  Menu, Minus, Plus, Search, ShoppingBag, SlidersHorizontal, X,
 } from 'lucide-react';
 import { getFragranceCategories, money, optimizedProductImage, type Fragrance } from './catalog';
 import { auth, authPersistence, db, isFirebaseConfigured } from './firebase';
@@ -27,13 +27,25 @@ const AdminPortal = lazy(() => import('./admin'));
 const PosTerminal = lazy(() => import('./pos').then((module) => ({ default: module.PosTerminal })));
 const PosCustomerDisplay = lazy(() => import('./pos').then((module) => ({ default: module.PosCustomerDisplay })));
 
-type Tab = 'Home' | 'Search' | 'Wishlist' | 'Account' | 'Cart' | 'Orders';
+type Tab = 'Home' | 'Search' | 'Wishlist' | 'Account' | 'Cart' | 'Orders' | 'About' | 'Contact' | 'Support';
 type AdminView = 'dashboard' | 'pos' | 'customer-display' | null;
 type CartLine = { id: string; quantity: number };
 type Panel = 'menu' | 'detail' | 'filters' | 'finder' | 'checkout' | 'feedback' | null;
 type FinderAnswers = { category: string; family: string; occasion: string; budget: string; strength: string };
+type ContactFormValues = { name: string; email: string; phone: string; subject: string; message: string };
+type ContactPageProps = {
+  form: ContactFormValues;
+  onChange: (field: keyof ContactFormValues, value: string) => void;
+  sending: boolean;
+  error: string;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+};
 const adminEmailAllowlist = new Set(['perfumenerd6@gmail.com']);
 const tabNames: Tab[] = ['Home', 'Search', 'Wishlist', 'Account', 'Cart'];
+const isValidPhoneNumber = (value: string) => {
+  const compact = value.trim().replace(/[\s()+.-]/g, '');
+  return /^0\d{9}$/.test(compact) || /^233\d{9}$/.test(compact) || /^\d{8,15}$/.test(compact);
+};
 const getAdminView = (pathname: string): AdminView => pathname === '/admin'
   ? 'dashboard'
   : pathname === '/admin/pos'
@@ -80,6 +92,9 @@ function App() {
   const [feedbackEmail, setFeedbackEmail] = useState('');
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [feedbackError, setFeedbackError] = useState('');
+  const [contactForm, setContactForm] = useState({ name: '', email: '', phone: '', subject: 'Order Enquiry', message: '' });
+  const [contactSending, setContactSending] = useState(false);
+  const [contactError, setContactError] = useState('');
   const [verificationReturn, setVerificationReturn] = useState(false);
   const { products, settings, isLoading: storefrontLoading, settingsLoading, error: storefrontError, isDemo } = useStorefrontData();
   const [finderStep, setFinderStep] = useState(0);
@@ -286,6 +301,38 @@ function App() {
       setFeedbackSending(false);
     }
   };
+  const submitContact = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!db) {
+      setContactError('The contact form is unavailable right now. Please email perfumenerd6@gmail.com.');
+      return;
+    }
+    setContactError('');
+    setContactSending(true);
+    try {
+      const message = [
+        `Topic: ${contactForm.subject.trim()}`,
+        contactForm.phone.trim() ? `Phone: ${contactForm.phone.trim()}` : '',
+        '',
+        contactForm.message.trim(),
+      ].filter((line, index) => line || index === 2).join('\n');
+      await addDoc(collection(db, 'feedback'), {
+        message,
+        name: contactForm.name.trim(),
+        email: contactForm.email.trim(),
+        userId: user?.uid ?? null,
+        status: 'new',
+        createdAt: serverTimestamp(),
+      });
+      setContactForm({ name: '', email: '', phone: '', subject: 'Order Enquiry', message: '' });
+      setToast('Thank you. Your message has been sent.');
+    } catch (reason) {
+      console.error('Could not submit the contact message.', reason);
+      setContactError('Your message could not be sent. Please try again or contact us by email.');
+    } finally {
+      setContactSending(false);
+    }
+  };
   const addToCart = (product: Fragrance) => {
     if (product.stock <= 0) { setToast('This fragrance is currently out of stock.'); return; }
     setCart((current) => {
@@ -351,6 +398,26 @@ function App() {
       setCheckoutBusy(false);
     }
   };
+  const openCheckout = async () => {
+    setCheckoutError('');
+    setPanel('checkout');
+    const currentUser = auth?.currentUser;
+    if (!currentUser || !db) return;
+    try {
+      const profile = await getDoc(doc(db, 'users', currentUser.uid));
+      if (!profile.exists()) return;
+      const details = profile.data();
+      setCheckoutForm((current) => ({
+        ...current,
+        name: current.name || (typeof details.name === 'string' ? details.name : ''),
+        email: current.email || currentUser.email || '',
+        phone: current.phone || (typeof details.phoneNumber === 'string' ? details.phoneNumber : ''),
+      }));
+    } catch (reason) {
+      console.error('Could not prefill checkout contact details.', reason);
+      setCheckoutError('Saved contact details could not be loaded. Please enter your delivery details.');
+    }
+  };
 
   const card = (product: Fragrance, priority = false) => <ProductCard key={product.id} product={product} priority={priority}
     saved={wishlist.includes(product.id)} onOpen={() => openProduct(product)}
@@ -373,8 +440,11 @@ function App() {
       </header>}
 
       <main className="page-content">
-        {!isAdminRoute && tab === 'Home' && <HomePage products={storefrontProducts} settings={settings} storefrontError={storefrontError} onNavigate={navigate} onNotice={() => { setFeedbackError(''); setPanel('feedback'); }}
+        {!isAdminRoute && tab === 'Home' && <HomePage products={storefrontProducts} settings={settings} storefrontError={storefrontError} onNavigate={navigate}
           onCategory={(value) => { setCategory(value); navigate('Search'); }} onFinder={() => { resetFinder(); setPanel('finder'); }} card={card} />}
+        {!isAdminRoute && tab === 'About' && <AboutPage />}
+        {!isAdminRoute && tab === 'Contact' && <ContactPage form={contactForm} onChange={(field, value) => setContactForm((current) => ({ ...current, [field]: value }))} sending={contactSending} error={contactError} onSubmit={submitContact} />}
+        {!isAdminRoute && tab === 'Support' && <SupportPage form={contactForm} onChange={(field, value) => setContactForm((current) => ({ ...current, [field]: value }))} sending={contactSending} error={contactError} onSubmit={submitContact} />}
         {!isAdminRoute && tab === 'Search' && <section className="content-page search-page">
           <div className="collection-hero">
             <div className="collection-hero-copy"><div className="eyebrow">{settings.collectionHeroEyebrow || defaultCollectionHeroSettings.eyebrow}</div><h1>{settings.collectionHeroTitle || defaultCollectionHeroSettings.title}</h1><p>{settings.collectionHeroText || defaultCollectionHeroSettings.text}</p><div className="collection-meta"><span>{storefrontLoading ? 'A curated collection' : `${products.length} curated fragrances`}</span><i /><span>Accra, Ghana</span></div></div>
@@ -393,7 +463,7 @@ function App() {
           <div className="collection-results-heading"><div><span className="eyebrow">THE EDIT</span><h2>{category === 'All' ? 'Every fragrance' : `${category} fragrances`}</h2></div><p className="result-count">{storefrontLoading ? 'Loading the edit' : `${filteredProducts.length} ${filteredProducts.length === 1 ? 'fragrance' : 'fragrances'}`}</p></div>
           {filteredProducts.length ? <div className="product-grid">{filteredProducts.map((product, index) => card(product, index < 4))}</div> : storefrontLoading ? <p className="storefront-loading">Preparing your fragrance edit…</p> : <EmptyState title="No fragrances found" text="Try another search or clear your filters." action="Clear search" onAction={() => { setQuery(''); setCategory('All'); setFilters({ family: 'All families', availability: 'Any availability', brand: 'All brands', price: 'Any price', concentration: 'All concentrations', occasion: 'Any occasion' }); }} />}
         </section>}
-        {!isAdminRoute && tab === 'Wishlist' && <section className="content-page"><div className="eyebrow">YOUR EDIT</div><h1>Saved scents.</h1><p className="page-intro">The fragrances you’re thinking about, all in one place.</p>
+        {!isAdminRoute && tab === 'Wishlist' && <section className="content-page"><h1>Saved scents.</h1><p className="page-intro">The fragrances you’re thinking about, all in one place.</p>
           {wishlist.length ? <div className="product-grid">{storefrontProducts.filter((item) => wishlist.includes(item.id)).map((product, index) => card(product, index < 4))}</div> : <EmptyState title="A little room for discovery." text="Save fragrances you love and find them here whenever you return." action="Explore the collection" onAction={() => navigate('Search')} />}</section>}
         {!isAdminRoute && tab === 'Account' && <AccountPage onNavigate={navigate} user={user} loading={authLoading} authError={authError} authRevision={authRevision} onAuthUpdated={() => setAuthRevision((revision) => revision + 1)} verificationReturn={verificationReturn} onVerificationReturnHandled={acknowledgeVerificationReturn} onAdmin={navigateAdmin} isAdmin={isAdmin} />}
         {!isAdminRoute && tab === 'Orders' && <OrderTrackingPage user={user} authLoading={authLoading} onPaymentConfirmed={clearCartAfterPayment} />}
@@ -408,7 +478,7 @@ function App() {
                 <button className="remove-button" onClick={() => setCart((current) => current.filter((item) => item.id !== line.id))}>Remove</button>
               </article>;
             })}</div>
-            <div className="cart-summary"><div><span>Subtotal</span><strong>{money(cartTotal)}</strong></div>{cartSavings > 0 && <div className="cart-sale-savings"><span>Sale savings</span><strong>−{money(cartSavings)}</strong></div>}<p>Delivery charges are not included in the online total.</p><button className="primary-button full-button" onClick={() => { setCheckoutError(''); setPanel('checkout'); }}>Continue to checkout <ArrowRight size={16} /></button><button className="text-button centered" onClick={() => navigate('Search')}>Continue browsing</button></div>
+            <div className="cart-summary"><div><span>Subtotal</span><strong>{money(cartTotal)}</strong></div>{cartSavings > 0 && <div className="cart-sale-savings"><span>Sale savings</span><strong>−{money(cartSavings)}</strong></div>}<p>Delivery charges are not included in the online total.</p><button className="primary-button full-button" onClick={() => { void openCheckout(); }}>Continue to checkout <ArrowRight size={16} /></button><button className="text-button centered" onClick={() => navigate('Search')}>Continue browsing</button></div>
           </>}</section>}
         {adminView === 'dashboard' && <Suspense fallback={<div className="admin-guard"><p>Opening administrator workspace…</p></div>}><AdminPortal user={user} loading={authLoading} isAdmin={isAdmin} claimLoading={adminClaimLoading} claimError={adminClaimError} onPos={navigatePos} onSignIn={() => navigate('Account')} /></Suspense>}
         {adminView === 'pos' && <Suspense fallback={<div className="admin-guard"><p>Opening the point of sale…</p></div>}><PosTerminal user={user} isAdmin={isAdmin && !adminClaimLoading} onBack={navigateAdmin} /></Suspense>}
@@ -436,7 +506,11 @@ function App() {
           <nav className="drawer-links">{['Home', 'Shop All', 'Orders', 'Best Sellers', 'Trending', 'New Arrivals'].map((item) =>
             <button key={item} onClick={() => { setCategory('All'); navigate(item === 'Home' ? 'Home' : item === 'Orders' ? 'Orders' : 'Search'); }}><span>{item}</span><ChevronRight size={16} /></button>)}
           </nav>
-          <div className="drawer-secondary">{['About us', 'Contact us', 'Help & support', 'Delivery & returns', 'Terms & privacy'].map((item) => <button key={item} onClick={() => { setPanel(null); setToast('Business contact and policy information has not been configured.'); }}>{item}</button>)}</div>
+          <div className="drawer-secondary">
+            <button onClick={() => navigate('About')}>About us</button>
+            <button onClick={() => navigate('Contact')}>Contact us</button>
+            <button onClick={() => navigate('Support')}>Help &amp; support</button>
+          </div>
           <p className="drawer-foot">A considered collection for every version of you.</p>
         </aside>}
         {panel === 'detail' && selected && <ProductDetail product={storefrontProducts.find((product) => product.id === selected.id) ?? selected} saved={wishlist.includes(selected.id)} onSave={() => toggleWishlist(selected.id)} onAdd={() => addToCart(storefrontProducts.find((product) => product.id === selected.id) ?? selected)} onClose={() => setPanel(null)} />}
@@ -452,7 +526,7 @@ function App() {
         </aside>}
         {panel === 'feedback' && <aside className="modal-card feedback-modal" role="dialog" aria-modal="true" aria-label="Send feedback">
           <button className="icon-button modal-close" onClick={() => setPanel(null)} aria-label="Close feedback form"><X size={20} /></button>
-          <div className="eyebrow">WE’D LOVE TO HEAR FROM YOU</div><h2>Send us a note.</h2><p className="page-intro">Questions, feedback or a little fragrance advice—we’re listening.</p>
+          <div className="eyebrow">WE’D LOVE TO HEAR FROM YOU</div><h2>Send us a note.</h2><p className="page-intro">Questions, feedback or a little fragrance advice. We’re listening.</p>
           <form className="feedback-form" onSubmit={submitFeedback}>
             {!user && <><label className="form-label">Your name (optional)<input maxLength={100} value={feedbackName} onChange={(e) => setFeedbackName(e.target.value)} /></label><label className="form-label">Email (optional)<input type="email" maxLength={254} value={feedbackEmail} onChange={(e) => setFeedbackEmail(e.target.value)} /></label></>}
             <label className="form-label">Your message<textarea required minLength={5} maxLength={2000} rows={5} value={feedbackText} onChange={(e) => setFeedbackText(e.target.value)} /></label>
@@ -475,7 +549,7 @@ function App() {
           <p className="checkout-note">Guest checkout is welcome. Your bag total is <strong>{money(cartTotal)}</strong>.</p>
           <form onSubmit={startCheckout} className="checkout-form">
             {([['name', 'Full name'], ['email', 'Email address'], ['phone', 'Phone number'], ['address', 'Delivery address'], ['city', 'City'], ['region', 'Region'], ['postalCode', 'Postal or GhanaPost GPS code']] as const).map(([field, label]) =>
-              <label className="form-label" key={field}>{label}<input required={field !== 'postalCode'} type={field === 'email' ? 'email' : 'text'} autoComplete={field === 'name' ? 'name' : field === 'email' ? 'email' : field === 'phone' ? 'tel' : field === 'address' ? 'street-address' : field === 'city' ? 'address-level2' : field === 'region' ? 'address-level1' : 'postal-code'} value={checkoutForm[field]} onChange={(e) => setCheckoutForm((current) => ({ ...current, [field]: e.target.value }))} /></label>)}
+              <label className="form-label" key={field}>{label}<input required={field !== 'postalCode'} type={field === 'email' ? 'email' : field === 'phone' ? 'tel' : 'text'} autoComplete={field === 'name' ? 'name' : field === 'email' ? 'email' : field === 'phone' ? 'tel' : field === 'address' ? 'street-address' : field === 'city' ? 'address-level2' : field === 'region' ? 'address-level1' : 'postal-code'} value={checkoutForm[field]} onChange={(e) => setCheckoutForm((current) => ({ ...current, [field]: e.target.value }))} /></label>)}
             {checkoutError && <p className="checkout-error" role="alert">{checkoutError}</p>}
             <p className="checkout-note">Pay securely with Paystack. Your current sale prices, product availability and Ghana cedi total are verified before payment. Delivery charges are not included in the online total.</p>
             <button className="primary-button full-button" type="submit" disabled={checkoutBusy}>{checkoutBusy ? 'Preparing secure payment…' : 'Continue to payment'} <ArrowRight size={16} /></button>
@@ -671,9 +745,9 @@ function ProductCard({ product, saved, onOpen, onSave, onAdd, priority = false }
   </article>;
 }
 
-function HomePage({ products: inventory, settings, storefrontError, onNavigate, onCategory, onFinder, onNotice, card }: {
+function HomePage({ products: inventory, settings, storefrontError, onNavigate, onCategory, onFinder, card }: {
   products: Fragrance[]; settings: StorefrontSettings; storefrontError: string; onNavigate: (tab: Tab) => void; onCategory: (category: string) => void;
-  onFinder: () => void; onNotice: () => void; card: (product: Fragrance, priority?: boolean) => ReactNode;
+  onFinder: () => void; card: (product: Fragrance, priority?: boolean) => ReactNode;
 }) {
   const heroImage = settings.heroImage || '';
   return <div className="home-page">
@@ -703,13 +777,130 @@ function HomePage({ products: inventory, settings, storefrontError, onNavigate, 
     <footer className="site-footer"><a className="wordmark footer-wordmark" href="/" onClick={(e) => { e.preventDefault(); onNavigate('Home'); }}>
       <img className="footer-brand-logo" src="/IMAGES/PERFUME-NERD-LOGO.png" alt="" />
       <span className="footer-brand-copy"><span>THE PERFUME NERD</span></span>
-    </a><p>{settings.footerText || 'Exceptional fragrance, thoughtfully found.'}</p><div className="footer-links"><button onClick={() => onNavigate('Search')}>Shop all</button><button onClick={onNotice}>Contact & feedback</button><button onClick={onNotice}>Delivery & returns</button><button onClick={onNotice}>Privacy & terms</button></div><small>© {new Date().getFullYear()} · Accra, Ghana</small></footer>
+    </a><p>{settings.footerText || 'Exceptional fragrance, thoughtfully found.'}</p><div className="footer-links"><button onClick={() => onNavigate('Search')}>Shop all</button><button onClick={() => onNavigate('About')}>About us</button><button onClick={() => onNavigate('Contact')}>Contact us</button><button onClick={() => onNavigate('Support')}>Help &amp; support</button></div><small>© {new Date().getFullYear()} · Accra, Ghana</small></footer>
   </div>;
 }
 
 function ProductShelf({ title, products: items, card }: { title: string; products: Fragrance[]; card: (product: Fragrance, priority?: boolean) => ReactNode }) {
   return <section className="shelf-section section-pad"><div className="section-heading"><h2>{title}</h2></div>
     <div className="shelf-row">{items.map((product) => card(product))}</div></section>;
+}
+
+function AboutPage() {
+  return <article className="content-page info-page about-page">
+    <header className="info-page-heading">
+      <div className="eyebrow">ABOUT US · THE PERFUME NERD</div>
+      <h1>A World of Fragrance. A Signature of Your Own.</h1>
+      <p>We believe fragrance is more than something you wear. It is an impression, an identity and a powerful way to express yourself. THE PERFUME NERD was created around a simple idea: everyone deserves access to exceptional fragrances and the confidence that comes with wearing a scent they truly love.</p>
+    </header>
+
+    <section className="info-section">
+      <div className="eyebrow">WHO WE ARE</div>
+      <h2>Your Destination for Exceptional Fragrances in Ghana</h2>
+      <p>THE PERFUME NERD is a fragrance destination built for individuals who appreciate the art of smelling exceptional. We bring together an appealing selection of fragrances for different personalities, preferences and occasions, making it easier to discover scents that leave a lasting impression.</p>
+      <p>Choosing a perfume is personal. Some fragrances make a statement, some bring back memories, while others quietly become part of your identity. Whether you already know your fragrance preferences or are exploring perfumery for the first time, we are here to make that journey enjoyable.</p>
+      <p>Our focus goes beyond selling perfumes. We are committed to a shopping experience built around quality, confidence, convenience and a genuine appreciation for fragrance.</p>
+      <div className="principle-grid">
+        <div><h3>Our Collection</h3><p>A carefully selected range of fragrances.</p></div>
+        <div><h3>Your Experience</h3><p>A shopping experience designed around you.</p></div>
+        <div><h3>Our Standard</h3><p>Quality and authenticity matter.</p></div>
+        <div><h3>Our Commitment</h3><p>Helping you discover your next signature scent.</p></div>
+      </div>
+    </section>
+
+    <section className="info-section journey-section">
+      <div className="eyebrow">OUR JOURNEY</div>
+      <h2>Driven by a Love for Fragrance</h2>
+      <p>Our journey is centred on making fragrance discovery more accessible, enjoyable and rewarding.</p>
+      <div className="journey-grid">
+        <div><span>01</span><h3>A Passion Becomes a Purpose</h3><p>An appreciation for fine fragrances grew into a destination where fragrance lovers can discover scents that reflect their individual style.</p></div>
+        <div><span>02</span><h3>Bringing Great Scents Together</h3><p>We are building a collection for different tastes, personalities and occasions.</p></div>
+        <div><span>03</span><h3>More Than Just a Purchase</h3><p>We aim to build meaningful relationships and make every fragrance-shopping experience worthwhile.</p></div>
+        <div><span>04</span><h3>A Lasting Fragrance Experience</h3><p>We plan to keep growing our collection and become a recognised fragrance destination in Ghana.</p></div>
+      </div>
+      <blockquote>“A fragrance may introduce you before you speak and remain memorable long after you leave.”<cite>THE PERFUME NERD</cite></blockquote>
+      <p className="about-location">Ghana · Made for Fragrance Enthusiasts</p>
+    </section>
+
+    <section className="info-section">
+      <div className="eyebrow">WHAT DRIVES US</div>
+      <h2>The Principles Behind Every Experience</h2>
+      <div className="principle-grid">
+        <div><h3>Quality Comes First</h3><p>We carefully consider the quality of the fragrances we offer.</p></div>
+        <div><h3>A Considered Collection</h3><p>We value a range of scent profiles, fragrance families and styles for different preferences.</p></div>
+        <div><h3>Your Satisfaction Matters</h3><p>We want every interaction, from discovery to delivery, to feel smooth and worthwhile.</p></div>
+        <div><h3>Convenience Without Compromise</h3><p>Discovering, selecting and receiving your next scent should feel effortless.</p></div>
+      </div>
+    </section>
+
+    <section className="info-section about-promise">
+      <div className="eyebrow">OUR PROMISE</div>
+      <h2>Exceptional Fragrance. Confidence in Every Bottle.</h2>
+      <p>Trust is just as important as the fragrance itself. We are committed to maintaining high standards in the products we offer and the experience we deliver.</p>
+      <p>Every customer deserves clarity, confidence and genuine value. We are a destination for people who appreciate the details behind a great scent, the emotion it carries and the impression it leaves.</p>
+      <strong>Discover your scent. Define your presence.</strong>
+      <span>THE PERFUME NERD</span>
+    </section>
+  </article>;
+}
+
+function ContactPage({ form, onChange, sending, error, onSubmit }: ContactPageProps) {
+  return <section className="content-page info-page contact-page">
+    <header className="info-page-heading">
+      <div className="eyebrow">GET IN TOUCH</div>
+      <h1>We'd Love to Hear from You</h1>
+      <p>Have a question, need help choosing a scent, or want to place a bulk order? Our friendly team is ready to help.</p>
+    </header>
+    <div className="contact-details-grid">
+      <article className="contact-card"><span className="eyebrow">CALL US</span><a href="tel:+233554757454">+233 (0) 554757454</a><p>Monday to Saturday, 8:00 AM to 8:00 PM</p><a className="contact-action" href="tel:+233554757454">Call now</a></article>
+      <article className="contact-card"><span className="eyebrow">EMAIL US</span><a href="mailto:perfumenerd6@gmail.com">perfumenerd6@gmail.com</a><p>We reply within 24 hours.</p><a className="contact-action" href="mailto:perfumenerd6@gmail.com">Send email</a></article>
+      <article className="contact-card"><span className="eyebrow">VISIT US</span><strong>Spintex, Accra</strong><p>Adjacent to Pizzaman Chickenman. Open daily, 8:00 AM to 8:00 PM.</p><a className="contact-action" href="https://maps.google.com/?q=5.632300979777558,-0.09979222271003226" target="_blank" rel="noopener noreferrer">Get directions</a></article>
+    </div>
+    <div className="contact-map"><iframe title="The Perfume Nerd location in Spintex, Accra" src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3970.5563897532543!2d-0.09979222271003226!3d5.632300979777558!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0xfdf85f121f3d1d3%3A0xc9eaa7ea7aa3b356!2sThe%20Perfume%20Nerd!5e0!3m2!1sen!2sgh!4v1794914247343!5m2!1sen!2sgh" loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /></div>
+    <MessageForm form={form} onChange={onChange} sending={sending} error={error} onSubmit={onSubmit} />
+    <WhatsAppCard />
+  </section>;
+}
+
+function SupportPage({ form, onChange, sending, error, onSubmit }: ContactPageProps) {
+  return <section className="content-page info-page support-page">
+    <header className="info-page-heading">
+      <div className="eyebrow">HELP &amp; SUPPORT</div>
+      <h1>How Can We Help?</h1>
+      <p>Contact our team about an order, a product or choosing your next fragrance.</p>
+    </header>
+    <div className="contact-details-grid support-details-grid">
+      <article className="contact-card"><span className="eyebrow">CALL US</span><a href="tel:+233554757454">+233 (0) 554757454</a><p>Monday to Saturday, 8:00 AM to 8:00 PM</p><a className="contact-action" href="tel:+233554757454">Call now</a></article>
+      <article className="contact-card"><span className="eyebrow">EMAIL US</span><a href="mailto:perfumenerd6@gmail.com">perfumenerd6@gmail.com</a><p>We reply within 24 hours.</p><a className="contact-action" href="mailto:perfumenerd6@gmail.com">Send email</a></article>
+      <WhatsAppCard />
+    </div>
+    <MessageForm form={form} onChange={onChange} sending={sending} error={error} onSubmit={onSubmit} />
+  </section>;
+}
+
+function MessageForm({ form, onChange, sending, error, onSubmit }: ContactPageProps) {
+  return <section className="contact-form-section">
+    <div className="eyebrow">SEND A MESSAGE</div>
+    <h2>How Can We Help?</h2>
+    <p>Fill in the form and we'll get back to you within 24 hours.</p>
+    <form className="contact-form" onSubmit={onSubmit}>
+      <label className="form-label">Full name *<input required maxLength={100} autoComplete="name" value={form.name} onChange={(event) => onChange('name', event.target.value)} /></label>
+      <label className="form-label">Email address *<input required type="email" maxLength={254} autoComplete="email" value={form.email} onChange={(event) => onChange('email', event.target.value)} /></label>
+      <label className="form-label">Phone (optional)<input type="tel" maxLength={32} autoComplete="tel" value={form.phone} onChange={(event) => onChange('phone', event.target.value)} /></label>
+      <label className="form-label">Subject *<select required value={form.subject} onChange={(event) => onChange('subject', event.target.value)}>
+        <option>Order Enquiry</option><option>Product Question</option><option>Returns &amp; Refunds</option><option>Wholesale / Bulk Order</option><option>Other</option>
+      </select></label>
+      <label className="form-label contact-message-field">Message *<textarea required minLength={5} maxLength={1800} rows={5} value={form.message} onChange={(event) => onChange('message', event.target.value)} /></label>
+      {error && <p className="auth-error contact-form-error" role="alert">{error}</p>}
+      <button className="primary-button contact-submit" type="submit" disabled={sending}>{sending ? 'Sending…' : 'Send message'} <ArrowRight size={15} /></button>
+    </form>
+  </section>;
+}
+
+function WhatsAppCard() {
+  return <a className="contact-card whatsapp-card" href="https://wa.me/233554757454" target="_blank" rel="noopener noreferrer">
+    <span className="eyebrow">WHATSAPP</span><strong>Chat with us</strong><p>Fastest response, usually within minutes.</p><span className="contact-action">Chat on WhatsApp</span>
+  </a>;
 }
 
 function ProductDetail({ product, saved, onSave, onAdd, onClose }: { product: Fragrance; saved: boolean; onSave: () => void; onAdd: () => void; onClose: () => void }) {
@@ -742,7 +933,7 @@ function FinderQuestion({ step, answers, onAnswer }: { step: number; answers: Fi
 }
 
 function EmptyState({ title, text, action, onAction }: { title: string; text: string; action: string; onAction: () => void }) {
-  return <div className="empty-state"><span className="empty-icon"><Sparkles size={21} /></span><h2>{title}</h2><p>{text}</p><button className="outline-button" onClick={onAction}>{action} <ArrowRight size={15} /></button></div>;
+  return <div className="empty-state"><h2>{title}</h2><p>{text}</p><button className="outline-button" onClick={onAction}>{action} <ArrowRight size={15} /></button></div>;
 }
 
 function AccountPage({ onNavigate, user, loading, authError, authRevision, onAuthUpdated, verificationReturn, onVerificationReturnHandled, onAdmin, isAdmin }: {
@@ -759,6 +950,7 @@ function AccountPage({ onNavigate, user, loading, authError, authRevision, onAut
 }) {
   const [mode, setMode] = useState<'sign-in' | 'sign-up' | 'reset'>('sign-in');
   const [name, setName] = useState('');
+  const [signupPhone, setSignupPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -809,6 +1001,10 @@ function AccountPage({ onNavigate, user, loading, authError, authRevision, onAut
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!auth) return;
+    if (mode === 'sign-up' && !isValidPhoneNumber(signupPhone)) {
+      setError('Enter a valid mobile number, including its country code if needed.');
+      return;
+    }
     begin();
     try {
       await authPersistence;
@@ -817,10 +1013,32 @@ function AccountPage({ onNavigate, user, loading, authError, authRevision, onAut
         setMessage('If an account exists for that email, a password reset link is on its way.');
       } else if (mode === 'sign-up') {
         const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-        if (name.trim()) await updateProfile(credential.user, { displayName: name.trim() });
+        const accountName = name.trim();
+        const phoneNumber = signupPhone.trim();
+        await updateProfile(credential.user, { displayName: accountName });
+        if (!db) throw new Error('Your account was created, but the contact details could not be saved. Please sign in and update your account details.');
+        await setDoc(doc(db, 'users', credential.user.uid), {
+          name: accountName,
+          phoneNumber,
+          address: '',
+          city: '',
+          region: '',
+          postalCode: '',
+          updatedAt: serverTimestamp(),
+        });
         hasPendingVerification.current = true;
         await sendEmailVerification(credential.user, { url: `${window.location.origin}/account?verified=1` });
-        setMessage('Your account is ready. Check your inbox for the email verification link.');
+        let accountMessage = 'Your account is ready. Check your inbox for the email verification link.';
+        try {
+          const sms = await orderApi<{ sent: boolean; status: string }>('/api/account/welcome-sms', {});
+          if (!sms.sent && sms.status !== 'already_sent' && sms.status !== 'in_progress') {
+            accountMessage += ' Your welcome SMS could not be sent. Please check your phone number or contact support.';
+          }
+        } catch (smsError) {
+          console.error('The welcome SMS could not be requested.', smsError);
+          accountMessage += ' Your welcome SMS could not be sent. Please check your phone number or contact support.';
+        }
+        setMessage(accountMessage);
       } else {
         await signInWithEmailAndPassword(auth, email.trim(), password);
       }
@@ -912,7 +1130,10 @@ function AccountPage({ onNavigate, user, loading, authError, authRevision, onAut
             </div>
             <div className="auth-heading"><h2>{mode === 'reset' ? 'Reset your password.' : mode === 'sign-up' ? 'A lovely place to begin.' : 'Welcome back.'}</h2><p>{mode === 'reset' ? 'We’ll email you a secure password reset link.' : mode === 'sign-up' ? 'Create an account to make your scent journey yours.' : 'Sign in to return to your fragrance edit.'}</p></div>
             <form className="auth-form" onSubmit={submit}>
-              {mode === 'sign-up' && <label className="form-label">Your name<input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} required /></label>}
+              {mode === 'sign-up' && <>
+                <label className="form-label">Your name<input autoComplete="name" maxLength={100} value={name} onChange={(event) => setName(event.target.value)} required /></label>
+                <label className="form-label">Phone number<input type="tel" autoComplete="tel" minLength={7} maxLength={32} placeholder="+233 24 123 4567" value={signupPhone} onChange={(event) => setSignupPhone(event.target.value)} required /></label>
+              </>}
               <label className="form-label">Email address<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
               {mode !== 'reset' && <label className="form-label">Password<input type="password" autoComplete={mode === 'sign-up' ? 'new-password' : 'current-password'} minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>}
               {error && <p className="auth-error" role="alert">{error}</p>}

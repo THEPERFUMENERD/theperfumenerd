@@ -88,9 +88,12 @@ The storefront uses the separate `the-perfume-nerd-api` Render web service for o
 Set these private values in the Render service's **Environment** settings. Never commit or send either credential to the repository:
 
 - `PAYSTACK_SECRET_KEY`: the Paystack test or live secret key.
+- `MNOTIFY_API_KEY`: the private mNotify SMS API key. Keep it only in the Render service environment.
 - `FIREBASE_SERVICE_ACCOUNT`: the complete JSON contents of a Firebase service-account key with permission to read and update Firestore orders/products and list Firebase Authentication users.
 
 Create/download the service-account JSON from Firebase project settings and paste the complete JSON as the Render environment variable value. Keep the downloaded file private and delete the local copy after configuring Render. The service uses Firebase Admin SDK server-side; this credential is not sent to browsers. `FIREBASE_PROJECT_ID`, `PUBLIC_STORE_URL`, and `ALLOWED_ORIGINS` are set by `render.yaml`. Add any custom storefront origin to `ALLOWED_ORIGINS` if needed.
+
+The SMS sender ID is `PERFUMENERD` (`MNOTIFY_SENDER_ID`). The API sends a welcome text after account creation, an order receipt after verified payment, and an update when an administrator changes fulfillment status. SMS delivery failures are logged and surfaced without reversing account, payment, or order-status changes.
 
 The storefront defaults to `https://the-perfume-nerd-api.onrender.com`; override it locally or for a different Render service with `VITE_ORDER_API_URL` in the ignored root `.env.local` file. No Firebase Functions deployment is required for online Paystack orders. The optional helper below configures the secret for the Firebase Functions emulator only:
 

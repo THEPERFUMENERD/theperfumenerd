@@ -90,6 +90,16 @@ test('administrator API routes require a Firebase sign-in token', async () => {
   assert.equal((await response.json()).message, 'Sign in to continue.');
 });
 
+test('welcome SMS endpoint requires the account owner to be signed in', async () => {
+  const response = await fetch(`${baseUrl}/api/account/welcome-sms`, {
+    method: 'POST',
+    headers: { Origin: allowedOrigin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).message, 'Sign in to continue.');
+});
+
 test('Paystack webhook rejects bad signatures and ignores signed unrelated events', async () => {
   const rawBody = Buffer.from(JSON.stringify({ event: 'transfer.success', data: {} }));
   const rejected = await fetch(`${baseUrl}/api/paystack/webhook`, {

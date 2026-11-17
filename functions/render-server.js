@@ -35,6 +35,7 @@ const {
   initializePaystackOrder,
   verifyPaystackOrder,
   lookupGuestOrder,
+  sendWelcomeSms,
   updateOnlineOrderStatus,
   listAdminUsers,
   processPaystackWebhook,
@@ -187,6 +188,10 @@ async function handleRequest(request, response) {
   let callable;
   let requiresAuth = false;
   switch (pathname) {
+    case '/api/account/welcome-sms':
+      callable = sendWelcomeSms;
+      requiresAuth = true;
+      break;
     case '/api/orders/initialize':
       callable = initializePaystackOrder;
       break;

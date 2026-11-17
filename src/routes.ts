@@ -1,6 +1,7 @@
-export type StorefrontTab = 'Home' | 'Search' | 'Wishlist' | 'Account' | 'Cart' | 'Orders';
+export type StorefrontTab = 'Home' | 'Search' | 'Wishlist' | 'Account' | 'Cart' | 'Orders' | 'About' | 'Contact' | 'Support';
 
 const tabNames: StorefrontTab[] = ['Home', 'Search', 'Wishlist', 'Account', 'Cart'];
+const infoPages: StorefrontTab[] = ['About', 'Contact', 'Support'];
 
 export function getStorefrontTab(pathname: string, search = ''): StorefrontTab {
   const searchParams = new URLSearchParams(search);
@@ -8,7 +9,7 @@ export function getStorefrontTab(pathname: string, search = ''): StorefrontTab {
     || (pathname === '/' && (searchParams.has('reference') || searchParams.has('trxref')))) {
     return 'Orders';
   }
-  return tabNames.find((item) => item.toLowerCase() === pathname.split('/')[1]) ?? 'Home';
+  return [...tabNames, ...infoPages].find((item) => item.toLowerCase() === pathname.split('/')[1]) ?? 'Home';
 }
 
 export function getStorefrontPath(pathname: string, search = ''): string {
