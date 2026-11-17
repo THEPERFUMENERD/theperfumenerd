@@ -1,12 +1,20 @@
 const MNOTIFY_SMS_URL = 'https://api.mnotify.com/api/sms/quick';
 
 export function normalizeSmsRecipient(value) {
-  if (typeof value !== 'string') throw new Error('A valid mobile number is required.');
+  if (typeof value !== 'string') throw new Error('Enter a valid Ghanaian mobile number.');
+  if (!/^[\d\s()+.-]+$/.test(value.trim())) {
+    throw new Error('Enter a valid Ghanaian mobile number.');
+  }
   const compact = value.trim().replace(/[\s()+.-]/g, '');
-  if (/^0\d{9}$/.test(compact)) return `233${compact.slice(1)}`;
-  if (/^233\d{9}$/.test(compact)) return compact;
-  if (/^\d{8,15}$/.test(compact)) return compact;
-  throw new Error('Enter a valid mobile number, including its country code.');
+  if (/^0\d{9}$/.test(compact)) return compact;
+  if (/^233\d{9}$/.test(compact)) return `0${compact.slice(3)}`;
+  throw new Error('Enter a valid Ghanaian mobile number.');
+}
+
+export function selectOrderSmsPhone(profilePhone, checkoutPhone) {
+  return typeof profilePhone === 'string' && profilePhone.trim()
+    ? profilePhone.trim()
+    : checkoutPhone;
 }
 
 export async function sendMnotifySms({
@@ -27,20 +35,25 @@ export async function sendMnotifySms({
   }
 
   const recipient = normalizeSmsRecipient(phone);
-  const response = await fetchImpl(`${MNOTIFY_SMS_URL}?key=${encodeURIComponent(apiKey.trim())}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      recipient: [recipient],
-      sender: senderId.trim(),
-      message: message.trim(),
-      is_schedule: false,
-      schedule_date: '',
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
+  let response;
+  try {
+    response = await fetchImpl(`${MNOTIFY_SMS_URL}?key=${encodeURIComponent(apiKey.trim())}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipient: [recipient],
+        sender: senderId.trim(),
+        message: message.trim(),
+        is_schedule: false,
+        schedule_date: '',
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw new Error('mNotify SMS request failed before a response was received.');
+  }
   const result = await response.json().catch(() => null);
-  if (!response.ok || result?.status === false || result?.status === 'failure' || result?.status === 'error') {
+  if (!response.ok || result?.status !== 'success') {
     throw new Error(`mNotify rejected the SMS request (HTTP ${response.status}).`);
   }
   return result;

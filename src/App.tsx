@@ -632,9 +632,15 @@ function OrderTrackingPage({ user, authLoading, onPaymentConfirmed }: {
           orderId: string;
           paymentStatus: string;
           status: string;
+          smsStatus?: string;
         }>('/api/orders/verify', { reference, email: checkout.email ?? '' });
         if (result.paymentStatus === 'paid') {
-          setPaymentNotice(`Payment received. Your order ${result.orderId} is confirmed.`);
+          const smsNotice = result.smsStatus === 'sent'
+            ? ' A text update was sent to your saved phone number.'
+            : result.smsStatus === 'failed'
+              ? ' We could not send a text update, but your order is confirmed.'
+              : '';
+          setPaymentNotice(`Payment received. Your order ${result.orderId} is confirmed.${smsNotice}`);
           onPaymentConfirmed();
           setGuestOrder(null);
         } else {

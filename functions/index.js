@@ -3,7 +3,7 @@ import { getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';
-import { normalizeSmsRecipient, sendMnotifySms } from './mnotify.js';
+import { normalizeSmsRecipient, selectOrderSmsPhone, sendMnotifySms } from './mnotify.js';
 
 if (getApps().length === 0) initializeApp();
 const db = getFirestore();
@@ -180,6 +180,17 @@ async function sendOrderSms(orderRef, notificationKey, phone, message) {
   }
 }
 
+async function getOrderSmsPhone(userId, checkoutPhone) {
+  if (typeof userId !== 'string' || !userId) return checkoutPhone;
+  try {
+    const profileSnapshot = await db.collection('users').doc(userId).get();
+    return selectOrderSmsPhone(profileSnapshot.data()?.phoneNumber, checkoutPhone);
+  } catch (error) {
+    console.error('Could not load the current account phone for an order SMS.', error);
+    return checkoutPhone;
+  }
+}
+
 async function recordSuccessfulOnlinePayment(reference, payment) {
   const orderRef = db.collection('orders').doc(reference);
   const result = await db.runTransaction(async (transaction) => {
@@ -195,6 +206,7 @@ async function recordSuccessfulOnlinePayment(reference, payment) {
         orderId: order.orderId,
         status: order.status,
         phone: order.customer?.phone,
+        userId: order.userId,
         totalMinor: order.totalMinor,
         shouldNotify: order.smsNotifications?.order_received?.status !== 'sent',
       };
@@ -244,6 +256,7 @@ async function recordSuccessfulOnlinePayment(reference, payment) {
       orderId: order.orderId,
       status: hasStock ? 'processing' : 'paid_needs_review',
       phone: order.customer?.phone,
+      userId: order.userId,
       totalMinor: order.totalMinor,
       shouldNotify: true,
     };
@@ -252,7 +265,8 @@ async function recordSuccessfulOnlinePayment(reference, payment) {
   const message = result.status === 'processing'
     ? `THE PERFUME NERD: We received and confirmed your order ${result.orderId} for GH₵${(result.totalMinor / 100).toFixed(2)}. We are preparing it for dispatch.`
     : `THE PERFUME NERD: We received your order ${result.orderId} and confirmed payment. Our team is checking availability and will update you shortly.`;
-  const smsStatus = await sendOrderSms(orderRef, 'order_received', result.phone, message);
+  const phone = await getOrderSmsPhone(result.userId, result.phone);
+  const smsStatus = await sendOrderSms(orderRef, 'order_received', phone, message);
   return { orderId: result.orderId, status: result.status, smsStatus };
 }
 
@@ -522,6 +536,7 @@ export const updateOnlineOrderStatus = onCall(async (request) => {
         changed: false,
         shouldNotify: order.smsNotifications?.[`fulfillment_${status}`]?.status !== 'sent',
         phone: order.customer?.phone,
+        userId: order.userId,
         orderId: order.orderId,
       };
     }
@@ -530,14 +545,15 @@ export const updateOnlineOrderStatus = onCall(async (request) => {
       updatedAt: FieldValue.serverTimestamp(),
       fulfillmentUpdatedBy: request.auth.uid,
     });
-    return { changed: true, shouldNotify: true, phone: order.customer?.phone, orderId: order.orderId };
+    return { changed: true, shouldNotify: true, phone: order.customer?.phone, userId: order.userId, orderId: order.orderId };
   });
   if (!update.shouldNotify) return { orderId, status, smsStatus: 'already_sent' };
   const [statusLabel, detail] = fulfillmentSmsDetails[status];
+  const phone = await getOrderSmsPhone(update.userId, update.phone);
   const smsStatus = await sendOrderSms(
     orderRef,
     `fulfillment_${status}`,
-    update.phone,
+    phone,
     `THE PERFUME NERD: Order ${update.orderId} update: ${statusLabel}. ${detail}`,
   );
   return { orderId, status, smsStatus };

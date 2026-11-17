@@ -1,12 +1,19 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { normalizeSmsRecipient, sendMnotifySms } from '../functions/mnotify.js';
+import { normalizeSmsRecipient, selectOrderSmsPhone, sendMnotifySms } from '../functions/mnotify.js';
 
 test('normalizes Ghana mobile numbers for mNotify', () => {
-  assert.equal(normalizeSmsRecipient('024 123 4567'), '233241234567');
-  assert.equal(normalizeSmsRecipient('+233 24 123 4567'), '233241234567');
-  assert.equal(normalizeSmsRecipient('233241234567'), '233241234567');
-  assert.throws(() => normalizeSmsRecipient('123'), /valid mobile number/i);
+  assert.equal(normalizeSmsRecipient('024 123 4567'), '0241234567');
+  assert.equal(normalizeSmsRecipient('+233 24 123 4567'), '0241234567');
+  assert.equal(normalizeSmsRecipient('233241234567'), '0241234567');
+  assert.throws(() => normalizeSmsRecipient('123'), /valid Ghanaian mobile number/i);
+  assert.throws(() => normalizeSmsRecipient('0505573287dfefeiffefef'), /valid Ghanaian mobile number/i);
+  assert.throws(() => normalizeSmsRecipient('+12025550123'), /valid Ghanaian mobile number/i);
+});
+
+test('prefers the latest account phone over the checkout phone for order SMS', () => {
+  assert.equal(selectOrderSmsPhone('  0241234567  ', '0201234567'), '0241234567');
+  assert.equal(selectOrderSmsPhone('', '0201234567'), '0201234567');
 });
 
 test('sends an SMS using the configured sender and server API key', async () => {
@@ -26,7 +33,7 @@ test('sends an SMS using the configured sender and server API key', async () => 
   assert.match(requestUrl, /^https:\/\/api\.mnotify\.com\/api\/sms\/quick\?key=server-test-key$/);
   assert.equal(requestOptions.method, 'POST');
   assert.deepEqual(JSON.parse(requestOptions.body), {
-    recipient: ['233241234567'],
+    recipient: ['0241234567'],
     sender: 'PERFUMENERD',
     message: 'Welcome.',
     is_schedule: false,
