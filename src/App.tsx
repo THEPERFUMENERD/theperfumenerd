@@ -8,6 +8,7 @@ import { auth, authPersistence, db, isFirebaseConfigured } from './firebase';
 import { LoadedImage } from './LoadedImage';
 import { applyStorefrontDiscounts } from './discounts';
 import { orderApi } from './order-api';
+import { getStorefrontPath, getStorefrontTab } from './routes';
 import {
   createUserWithEmailAndPassword,
   GoogleAuthProvider,
@@ -33,9 +34,6 @@ type Panel = 'menu' | 'detail' | 'filters' | 'finder' | 'checkout' | 'feedback' 
 type FinderAnswers = { category: string; family: string; occasion: string; budget: string; strength: string };
 const adminEmailAllowlist = new Set(['perfumenerd6@gmail.com']);
 const tabNames: Tab[] = ['Home', 'Search', 'Wishlist', 'Account', 'Cart'];
-const getStorefrontTab = (pathname: string): Tab => pathname === '/orders'
-  ? 'Orders'
-  : tabNames.find((item) => item.toLowerCase() === pathname.split('/')[1]) ?? 'Home';
 const getAdminView = (pathname: string): AdminView => pathname === '/admin'
   ? 'dashboard'
   : pathname === '/admin/pos'
@@ -55,9 +53,7 @@ const readStored = <T,>(key: string, fallback: T): T => {
 function App() {
   const [adminView, setAdminView] = useState<AdminView>(() => getAdminView(location.pathname));
   const isAdminRoute = adminView !== null;
-  const [tab, setTab] = useState<Tab>(() => {
-    return getStorefrontTab(location.pathname);
-  });
+  const [tab, setTab] = useState<Tab>(() => getStorefrontTab(location.pathname, location.search));
   const [cart, setCart] = useState<CartLine[]>(() => readStored('tpn-cart', []));
   const [wishlist, setWishlist] = useState<string[]>(() => readStored('tpn-wishlist', []));
   const [panel, setPanel] = useState<Panel>(null);
@@ -176,7 +172,7 @@ function App() {
   useEffect(() => {
     const onPopState = () => {
       setAdminView(getAdminView(location.pathname));
-      setTab(getStorefrontTab(location.pathname));
+      setTab(getStorefrontTab(location.pathname, location.search));
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -578,9 +574,10 @@ function OrderTrackingPage({ user, authLoading, onPaymentConfirmed }: {
       }
     };
     void verify();
+    const returnPath = getStorefrontPath(url.pathname, url.search);
     url.searchParams.delete('reference');
     url.searchParams.delete('trxref');
-    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    window.history.replaceState(window.history.state, '', `${returnPath}${url.search}${url.hash}`);
   }, [authLoading, user?.uid, onPaymentConfirmed]);
 
   const lookup = async (event: FormEvent<HTMLFormElement>) => {

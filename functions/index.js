@@ -222,7 +222,7 @@ export const initializePaystackOrder = onCall(async (request) => {
       amount: order.totalMinor,
       currency: 'GHS',
       reference: orderId,
-      callback_url: `${PUBLIC_STORE_URL.replace(/\/+$/, '')}/orders`,
+      callback_url: PUBLIC_STORE_URL.replace(/\/+$/, ''),
       metadata: {
         order_id: orderId,
         customer_name: customer.name,
