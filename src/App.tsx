@@ -461,8 +461,8 @@ function App() {
           </div>
           </div>
           <div className="filter-chips">{['All', 'Men', 'Women', 'Unisex'].map((item) => <button key={item} className={`chip ${category === item ? 'selected' : ''}`} onClick={() => setCategory(item)}>{item === 'All' ? 'All fragrances' : item}</button>)}</div>
-          <div className="collection-results-heading"><div><span className="eyebrow">THE EDIT</span><h2>{category === 'All' ? 'Every fragrance' : `${category} fragrances`}</h2></div><p className="result-count">{storefrontLoading ? 'Loading the edit' : `${filteredProducts.length} ${filteredProducts.length === 1 ? 'fragrance' : 'fragrances'}`}</p></div>
-          {filteredProducts.length ? <div className="product-grid">{filteredProducts.map((product, index) => card(product, index < 4))}</div> : storefrontLoading ? <p className="storefront-loading">Preparing your fragrance edit…</p> : <EmptyState title="No fragrances found" text="Try another search or clear your filters." action="Clear search" onAction={() => { setQuery(''); setCategory('All'); setFilters({ family: 'All families', availability: 'Any availability', brand: 'All brands', price: 'Any price', concentration: 'All concentrations', occasion: 'Any occasion' }); }} />}
+          <div className="collection-results-heading"><div><span className="eyebrow">THE COLLECTION</span><h2>{category === 'All' ? 'Every fragrance' : `${category} fragrances`}</h2></div><p className="result-count">{storefrontLoading ? 'Loading fragrances' : `${filteredProducts.length} ${filteredProducts.length === 1 ? 'fragrance' : 'fragrances'}`}</p></div>
+          {filteredProducts.length ? <div className="product-grid">{filteredProducts.map((product, index) => card(product, index < 4))}</div> : storefrontLoading ? <p className="storefront-loading">Preparing your fragrance collection…</p> : <EmptyState title="No fragrances found" text="Try another search or clear your filters." action="Clear search" onAction={() => { setQuery(''); setCategory('All'); setFilters({ family: 'All families', availability: 'Any availability', brand: 'All brands', price: 'Any price', concentration: 'All concentrations', occasion: 'Any occasion' }); }} />}
         </section>}
         {!isAdminRoute && tab === 'Wishlist' && <section className="content-page"><h1>Saved scents.</h1><p className="page-intro">The fragrances you’re thinking about, all in one place.</p>
           {wishlist.length ? <div className="product-grid">{storefrontProducts.filter((item) => wishlist.includes(item.id)).map((product, index) => card(product, index < 4))}</div> : <EmptyState title="A little room for discovery." text="Save fragrances you love and find them here whenever you return." action="Explore the collection" onAction={() => navigate('Search')} />}</section>}
@@ -702,8 +702,7 @@ function OrderTrackingPage({ user, authLoading, onPaymentConfirmed }: {
   };
 
   return <section className="content-page orders-page">
-    <div className="eyebrow">YOUR PERFUME NERD</div><h1>Your orders.</h1>
-    <p className="page-intro">Follow your fragrance delivery from payment through to your door.</p>
+    <h1>Your orders.</h1>
     {paymentNotice && <div className="order-notice success" role="status"><Check size={18} /><span>{paymentNotice}</span></div>}
     {paymentError && <p className="auth-error" role="alert">{paymentError}</p>}
     {!authLoading && user && <section className="orders-section"><div className="orders-section-heading"><h2>Account orders</h2><span>{orders.length} {orders.length === 1 ? 'order' : 'orders'}</span></div>
@@ -780,7 +779,7 @@ function HomePage({ products: inventory, settings, storefrontError, onNavigate, 
     </section>
     <ProductShelf title="The most loved" products={inventory.filter((item) => item.badge === 'BEST SELLER')} card={card} />
     <section className="finder-promo"><div><div className="eyebrow">{settings.finderEyebrow || defaultFinderSettings.eyebrow}</div><h2>{(settings.finderTitle || defaultFinderSettings.title).split('\n').map((line, index) => <Fragment key={`${index}-${line}`}>{index > 0 && <br />}{line}</Fragment>)}</h2><p>{settings.finderText || defaultFinderSettings.text}</p><button className="primary-button" onClick={onFinder}>{settings.finderButtonText || defaultFinderSettings.buttonText} <ArrowRight size={15} /></button></div><div className="promo-image">{(settings.finderImage || defaultFinderSettings.image) && <LoadedImage key={settings.finderImage || defaultFinderSettings.image} className="" src={settings.finderImage || defaultFinderSettings.image} alt="Perfume bottle with a soft floral arrangement" />}<span>{settings.finderCaption || defaultFinderSettings.caption}</span></div></section>
-    <section className="trust-section"><div className="eyebrow">A MORE THOUGHTFUL WAY TO SHOP</div><h2>Good scent. No guesswork.</h2><div className="trust-grid"><div><span className="trust-number">01</span><h3>Find your point of view</h3><p>Explore by notes, families and the feelings you want to leave behind.</p></div><div><span className="trust-number">02</span><h3>Make it personal</h3><p>Take a moment with our fragrance finder to discover a direction.</p></div><div><span className="trust-number">03</span><h3>Shop with confidence</h3><p>We’re building a considered fragrance destination in Ghana.</p></div></div><p className="trust-disclaimer">Product availability and business services shown in this preview are sample data and require verification before launch.</p></section>
+    <section className="trust-section"><div className="eyebrow">A MORE THOUGHTFUL WAY TO SHOP</div><h2>Good scent. No guesswork.</h2><div className="trust-grid"><div><span className="trust-number">01</span><h3>Find your point of view</h3></div><div><span className="trust-number">02</span><h3>Make it personal</h3></div><div><span className="trust-number">03</span><h3>Shop with confidence</h3></div></div></section>
     <footer className="site-footer"><a className="wordmark footer-wordmark" href="/" onClick={(e) => { e.preventDefault(); onNavigate('Home'); }}>
       <img className="footer-brand-logo" src="/IMAGES/PERFUME-NERD-LOGO.png" alt="" />
       <span className="footer-brand-copy"><span>THE PERFUME NERD</span></span>
@@ -796,14 +795,12 @@ function ProductShelf({ title, products: items, card }: { title: string; product
 function AboutPage() {
   return <article className="content-page info-page about-page">
     <header className="info-page-heading">
-      <div className="eyebrow">ABOUT US · THE PERFUME NERD</div>
       <h1>A World of Fragrance. A Signature of Your Own.</h1>
       <p>Fragrance is personal. We make it easier to explore scents that suit your style, your moments and the impression you want to leave.</p>
     </header>
 
     <section className="about-values">
       <div className="about-values-heading">
-        <div className="eyebrow">A FRAGRANCE DESTINATION IN GHANA</div>
         <h2>Find the scent that feels like you.</h2>
         <p>Whether you know what you love or are just beginning to explore, we’re here to make discovering fragrance feel simple and personal.</p>
       </div>
@@ -1087,8 +1084,7 @@ function AccountPage({ onNavigate, user, loading, authError, authRevision, onAut
   };
 
   return <section className="content-page account-page">
-    <div className="eyebrow">YOUR PERFUME NERD</div><h1>Your account.</h1>
-    <p className="page-intro">Sign in to keep your fragrance journey close.</p>
+    <h1>Your account.</h1>
     {loading ? <div className="account-card" role="status"><div className="account-mark"><UserIcon size={25} /></div><p>Checking your account…</p></div> :
       user ? <div className="account-card signed-in-card">
         <div className="account-mark"><UserIcon size={25} /></div>
@@ -1114,7 +1110,7 @@ function AccountPage({ onNavigate, user, loading, authError, authRevision, onAut
               <button type="button" className={mode === 'sign-in' ? 'selected' : ''} onClick={() => { setMode('sign-in'); setError(''); setMessage(''); }}>Sign in</button>
               <button type="button" className={mode === 'sign-up' ? 'selected' : ''} onClick={() => { setMode('sign-up'); setError(''); setMessage(''); }}>Create account</button>
             </div>
-            <div className="auth-heading"><h2>{mode === 'reset' ? 'Reset your password.' : mode === 'sign-up' ? 'A lovely place to begin.' : 'Welcome back.'}</h2><p>{mode === 'reset' ? 'We’ll email you a secure password reset link.' : mode === 'sign-up' ? 'Create an account to make your scent journey yours.' : 'Sign in to return to your fragrance edit.'}</p></div>
+            <div className="auth-heading"><h2>{mode === 'reset' ? 'Reset your password.' : mode === 'sign-up' ? 'A lovely place to begin.' : 'Welcome back.'}</h2><p>{mode === 'reset' ? 'We’ll email you a secure password reset link.' : mode === 'sign-up' ? 'Create an account to make your scent journey yours.' : 'Sign in to return to your fragrance collection.'}</p></div>
             <form className="auth-form" onSubmit={submit}>
               {mode === 'sign-up' && <>
                 <label className="form-label">Your name<input autoComplete="name" maxLength={100} value={name} onChange={(event) => setName(event.target.value)} required /></label>

@@ -83,9 +83,9 @@ export const defaultFinderSettings = {
 export const defaultCollectionHeroSettings = {
   eyebrow: 'THE PERFUME NERD · FRAGRANCE HOUSE',
   title: 'Find the scent that feels like you.',
-  text: 'Explore a considered edit of fragrances for every mood, moment and side of you.',
+  text: 'Explore a considered collection of fragrances for every mood, moment and side of you.',
   image: '',
-  caption: 'THE SIGNATURE EDIT',
+  caption: 'THE SIGNATURE COLLECTION',
 };
 
 const productsCacheKey = 'tpn-storefront-products-v1';
