@@ -49,6 +49,11 @@ img { display: block; max-width: 100%; }
 .hero-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 47%; }
 .hero-shade { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(28,25,22,.72) 0%, rgba(28,25,22,.43) 42%, rgba(28,25,22,.05) 100%), linear-gradient(0deg, rgba(28,25,22,.15), transparent 25%); }
 .hero-copy { position: absolute; top: 50%; left: clamp(26px, 10.2vw, 150px); width: min(530px, 75%); transform: translateY(-45%); }
+.home-page > .hero:not(.website-hero-preview) > .hero-copy { animation: hero-copy-enter 2.4s cubic-bezier(.22,.72,.24,1) both; }
+@keyframes hero-copy-enter {
+  from { opacity: 0; transform: translate(72px, -45%); }
+  to { opacity: 1; transform: translate(0, -45%); }
+}
 .eyebrow { color: var(--accent); font-size: 9px; font-weight: 700; letter-spacing: .18em; line-height: 1.6; }
 .light-eyebrow { color: rgba(255,255,255,.82); }
 .hero h1 { margin: 17px 0 13px; font-family: var(--serif); font-size: clamp(45px, 6.3vw, 76px); font-weight: 500; line-height: 1.08; letter-spacing: -.035em; }
@@ -354,6 +359,19 @@ img { display: block; max-width: 100%; }
 .finder-results .restart { position: absolute; top: 8px; right: 0; color: var(--accent); font-size: 10px; }
 .checkout-note { color: #77736e; font-size: 11px; line-height: 1.8; }
 .checkout-note strong { color: var(--ink); }
+.checkout-fulfillment { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin: 18px 0 8px; padding: 0; border: 0; }
+.checkout-fulfillment legend { grid-column: 1 / -1; margin-bottom: 10px; color: #5e5a54; font-size: 10px; font-weight: 600; }
+.checkout-fulfillment-option { min-width: 0; min-height: 67px; display: flex; align-items: center; gap: 10px; padding: 11px; border: 1px solid #e1dcd5; border-radius: 12px; background: rgba(255,255,255,.65); cursor: pointer; transition: background .2s ease, border-color .2s ease, box-shadow .2s ease; }
+.checkout-fulfillment-option.selected { border-color: #9c8062; background: #f4efe8; box-shadow: 0 0 0 2px rgba(141,110,78,.08); }
+.checkout-fulfillment-option input { width: 16px; height: 16px; flex: 0 0 auto; margin: 0; accent-color: var(--accent); }
+.checkout-fulfillment-option > span { min-width: 0; display: grid; gap: 4px; }
+.checkout-fulfillment-option strong { color: var(--ink); font-size: 11px; font-weight: 650; }
+.checkout-fulfillment-option small { color: #77736e; font-size: 9px; line-height: 1.4; }
+.checkout-pickup-location { display: grid; gap: 7px; margin: 12px 0; padding: 16px; border: 1px solid #e8e1d8; border-radius: 13px; background: #f8f5f0; }
+.checkout-pickup-location .eyebrow { margin-bottom: 2px; font-size: 8px; }
+.checkout-pickup-location strong { font-family: var(--serif); font-size: 17px; font-weight: 500; }
+.checkout-pickup-location > span:not(.eyebrow), .checkout-pickup-location a { color: #77736e; font-size: 10px; line-height: 1.6; }
+.checkout-pickup-location a { width: fit-content; color: var(--accent); font-weight: 700; }
 .checkout-form .form-label { margin: 13px 0; }
 .checkout-form .form-label input { min-height: 40px; }
 .checkout-error { padding: 10px 12px; border: 1px solid #e0c3bb; border-radius: 8px; background: #fbf1ee; color: #7e4033; font-size: 10px; line-height: 1.6; }
@@ -624,6 +642,7 @@ img { display: block; max-width: 100%; }
 @keyframes toast-in { from { transform: translate(50%, 8px); opacity: 0; } to { transform: translate(50%, 0); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .home-page > .hero:not(.website-hero-preview) > .hero-copy { animation: none; }
 }
 
 @media (min-width: 1450px) {
@@ -842,6 +861,10 @@ img { display: block; max-width: 100%; }
   .hero-image { object-position: 58% center; }
   .hero-shade { background: linear-gradient(90deg, rgba(28,25,22,.68), rgba(28,25,22,.22) 82%), linear-gradient(0deg, rgba(28,25,22,.28), transparent 60%); }
   .hero-copy { top: 52%; left: 24px; width: calc(100% - 48px); transform: translateY(-42%); }
+  @keyframes hero-copy-enter {
+    from { opacity: 0; transform: translate(42px, -42%); }
+    to { opacity: 1; transform: translate(0, -42%); }
+  }
   .hero h1 { margin-top: 14px; font-size: clamp(43px, 12vw, 59px); }
   .hero-copy p { max-width: 270px; font-size: 12px; }
   .hero-caption { right: 16px; bottom: 15px; font-size: 7px; }
