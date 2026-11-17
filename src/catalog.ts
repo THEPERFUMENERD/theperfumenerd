@@ -1,5 +1,7 @@
 export const fragranceCategories = ['Men', 'Women', 'Unisex'] as const;
 export type FragranceCategory = (typeof fragranceCategories)[number];
+export const fragranceFamilies = ['Sweet', 'Fresh', 'Woody', 'Spicy', 'Floral', 'Oud', 'Citrus', 'Vanilla'] as const;
+export type FragranceFamily = (typeof fragranceFamilies)[number];
 
 export type Fragrance = {
   id: string;
@@ -9,6 +11,7 @@ export type Fragrance = {
   category: FragranceCategory;
   categories?: FragranceCategory[];
   family: string;
+  families?: string[];
   strength: 'Soft' | 'Moderate' | 'Strong';
   concentration: string;
   notes: string[];
@@ -29,6 +32,20 @@ export const getFragranceCategories = (
       fragranceCategories.includes(value as FragranceCategory))
     : [];
   return categories.length ? [...new Set(categories)] : [product.category];
+};
+
+export const getFragranceFamilies = (
+  product: Pick<Fragrance, 'family' | 'families'>,
+): FragranceFamily[] => {
+  const families = Array.isArray(product.families)
+    ? product.families
+    : typeof product.family === 'string'
+      ? product.family.split(',')
+      : [];
+  return [...new Set(families
+    .map((family) => family.trim())
+    .filter((family): family is FragranceFamily =>
+      fragranceFamilies.includes(family as FragranceFamily)))];
 };
 
 const image = (id: string, width = 720) =>

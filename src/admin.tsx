@@ -11,7 +11,7 @@ import { orderApi } from './order-api';
 import { formatOrderDateTime, formatOrderDay, formatOrderId, groupOrdersByDay, localDateInputValue, orderDateKey, searchOrders } from './order-management';
 import { getAdminOverviewMetrics, getRecentRevenue, revenueBarHeight } from './admin-overview';
 import { LoadedImage } from './LoadedImage';
-import { fragranceCategories, getFragranceCategories, money, products as sampleProducts, type Fragrance } from './catalog';
+import { fragranceCategories, fragranceFamilies, getFragranceCategories, getFragranceFamilies, money, products as sampleProducts, type Fragrance, type FragranceFamily } from './catalog';
 import { cacheStorefrontSettings, defaultCollectionHeroSettings, defaultCollectionSettings, defaultFinderSettings, defaultHeroSettings, type StorefrontSettings } from './storefront-data';
 
 type AdminSection = 'overview' | 'products' | 'orders' | 'users' | 'discount-sales' | 'website-images' | 'storefront' | 'feedback';
@@ -38,7 +38,7 @@ type AdminSale = {
 };
 type AdminUser = { uid: string; name: string; email: string; phoneNumber: string; createdAt: string };
 const blankProduct: ProductDraft = {
-  id: '', name: '', brand: '', price: 0, category: 'Unisex', categories: ['Unisex'], family: 'Woody',
+  id: '', name: '', brand: '', price: 0, category: 'Unisex', categories: ['Unisex'], family: 'Woody', families: ['Woody'],
   strength: 'Moderate', concentration: 'Eau de Parfum', notes: [], occasion: [],
   description: '', image: '', badge: '', stock: 0,
 };
@@ -224,6 +224,14 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
     setError('');
     setDraft((current) => ({ ...current, category: categories[0], categories }));
   };
+  const toggleProductFamily = (family: FragranceFamily) => {
+    const currentFamilies = getFragranceFamilies(draft);
+    const families = currentFamilies.includes(family)
+      ? currentFamilies.filter((item) => item !== family)
+      : [...currentFamilies, family];
+    setError('');
+    setDraft((current) => ({ ...current, family: families.join(', '), families }));
+  };
   const saveProduct = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     clearAlerts();
@@ -236,7 +244,8 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
       setError('Use a product name that creates a URL-friendly ID with at least two characters.');
       return;
     }
-    if (!draft.name.trim() || !draft.brand.trim() || !draft.family.trim() || !draft.concentration.trim()) {
+    const families = getFragranceFamilies(draft);
+    if (!draft.name.trim() || !draft.brand.trim() || families.length === 0 || !draft.concentration.trim()) {
       setError('Complete the product name, brand, fragrance family, and concentration before saving.');
       return;
     }
@@ -262,6 +271,8 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
       if (!data.badge) delete data.badge;
       await setDoc(doc(db, 'products', id), {
         ...data,
+        family: families.join(', '),
+        families,
         categories,
         category: categories[0],
         name: data.name.trim(),
@@ -631,7 +642,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
         {editing ? <form className="admin-form admin-panel" noValidate onSubmit={saveProduct}><div className="admin-panel-heading"><h3>{draft.id ? 'Edit fragrance' : 'Add fragrance'}</h3><button type="button" className="icon-button" onClick={() => setEditing(false)} aria-label="Close product form"><X size={19} /></button></div>
           <div className="admin-form-grid"><label className="form-label">Product name<input required value={draft.name} onChange={(e) => setDraft((current) => ({ ...current, name: e.target.value, id: current.id || makeSlug(e.target.value) }))} /></label><label className="form-label">Brand<input required value={draft.brand} onChange={(e) => setDraft((current) => ({ ...current, brand: e.target.value }))} /></label>
             <label className="form-label">Price (GH₵)<input required type="number" min="0" step="1" value={draft.price} onChange={(e) => setDraft((current) => ({ ...current, price: Number(e.target.value) }))} /></label><label className="form-label">Stock quantity<input required type="number" min="0" step="1" value={draft.stock} onChange={(e) => setDraft((current) => ({ ...current, stock: Number(e.target.value) }))} /></label>
-            <fieldset className="admin-category-field"><legend>Categories <span>Select all that apply</span></legend><div className="admin-category-options">{fragranceCategories.map((category) => <label key={category}><input type="checkbox" checked={getFragranceCategories(draft).includes(category)} onChange={() => toggleProductCategory(category)} /><span>{category}</span></label>)}</div></fieldset><label className="form-label">Fragrance family<input required value={draft.family} onChange={(e) => setDraft((current) => ({ ...current, family: e.target.value }))} /></label>
+            <fieldset className="admin-category-field"><legend>Categories <span>Select all that apply</span></legend><div className="admin-category-options">{fragranceCategories.map((category) => <label key={category}><input type="checkbox" checked={getFragranceCategories(draft).includes(category)} onChange={() => toggleProductCategory(category)} /><span>{category}</span></label>)}</div></fieldset><div className="form-label admin-family-field"><span>Fragrance family</span><details className="admin-family-select"><summary aria-label="Choose fragrance families"><span>{getFragranceFamilies(draft).join(', ') || 'Choose one or more families'}</span><ChevronDown size={15} /></summary><div className="admin-family-options">{fragranceFamilies.map((family) => <label key={family}><input type="checkbox" checked={getFragranceFamilies(draft).includes(family)} onChange={() => toggleProductFamily(family)} />{family}</label>)}</div></details><small>Select one or more families.</small></div>
             <label className="form-label">Concentration<input required value={draft.concentration} onChange={(e) => setDraft((current) => ({ ...current, concentration: e.target.value }))} /></label>
             <label className="form-label">Collection badge<select value={draft.badge || ''} onChange={(e) => setDraft((current) => ({ ...current, badge: e.target.value || undefined }))}><option value="">No badge</option><option>BEST SELLER</option><option>TRENDING</option><option>NEW ARRIVAL</option><option>ICONIC</option></select></label><label className="form-label">Product ID<input required pattern="[a-z0-9][a-z0-9-]{1,79}" value={draft.id} onChange={(e) => setDraft((current) => ({ ...current, id: makeSlug(e.target.value) }))} /></label>
             <label className="form-label admin-span-two">Main product image URL<input required type="url" value={draft.image} onChange={(e) => setDraft((current) => ({ ...current, image: e.target.value }))} /></label>

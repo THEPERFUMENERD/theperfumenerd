@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { getFragranceCategories, optimizedCloudinaryImage, optimizedProductImage } from '../src/catalog.ts';
+import { getFragranceCategories, getFragranceFamilies, optimizedCloudinaryImage, optimizedProductImage } from '../src/catalog.ts';
 
 test('legacy fragrances retain their single category', () => {
   assert.deepEqual(getFragranceCategories({ category: 'Men' }), ['Men']);
@@ -20,6 +20,12 @@ test('multi-category fragrances appear in each selected category without duplica
 
 test('an empty category list falls back to the legacy primary category', () => {
   assert.deepEqual(getFragranceCategories({ category: 'Women', categories: [] }), ['Women']);
+});
+
+test('legacy single fragrance families and selected multiple families normalize consistently', () => {
+  assert.deepEqual(getFragranceFamilies({ family: 'Woody' }), ['Woody']);
+  assert.deepEqual(getFragranceFamilies({ family: 'Sweet, Fresh', families: ['Sweet', 'Fresh', 'Sweet'] }), ['Sweet', 'Fresh']);
+  assert.deepEqual(getFragranceFamilies({ family: 'Amber' }), []);
 });
 
 test('Cloudinary product images request responsive automatic format and compression', () => {

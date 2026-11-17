@@ -506,6 +506,18 @@ img { display: block; max-width: 100%; }
 .admin-form-grid .form-label { margin: 9px 0; }
 .admin-form-grid .form-label small { color: #99938b; font-size: 8px; font-weight: 400; }
 .admin-form-grid .form-label textarea { width: 100%; }
+.admin-family-field { position: relative; }
+.admin-family-select { position: relative; }
+.admin-family-select[open] { z-index: 6; }
+.admin-family-select summary { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 11px; border: 1px solid #ded9d1; border-radius: 7px; background: #fff; color: var(--ink); font-size: 10px; cursor: pointer; list-style: none; }
+.admin-family-select summary::-webkit-details-marker { display: none; }
+.admin-family-select summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-family-select summary svg { flex: 0 0 auto; color: #81796f; transition: transform .18s ease; }
+.admin-family-select[open] summary svg { transform: rotate(180deg); }
+.admin-family-options { position: absolute; top: calc(100% + 5px); left: 0; z-index: 7; width: 100%; max-height: 240px; overflow-y: auto; padding: 6px; border: 1px solid #e4ddd4; border-radius: 10px; background: #fff; box-shadow: 0 12px 28px rgba(37,35,33,.14); }
+.admin-family-options label { min-height: 34px; display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 6px; color: #4d4943; font-size: 10px; cursor: pointer; }
+.admin-family-options label:hover { background: #f7f4ef; }
+.admin-family-options input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
 .admin-span-two { grid-column: span 2; }
 .admin-upload-button { width: fit-content; min-height: 38px; display: inline-flex; align-items: center; gap: 8px; margin: 10px 0 16px; padding: 0 12px; border: 1px dashed #cfc6ba; border-radius: 3px; color: #695b4a; font-size: 9px; cursor: pointer; }
 .admin-upload-button input { display: none; }
