@@ -84,6 +84,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
   const [uploading, setUploading] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<UploadTarget | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadFeedback, setUploadFeedback] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<StorefrontSettings>({});
   const uploadRequest = useRef<XMLHttpRequest | null>(null);
 
@@ -194,7 +195,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
     console.error(fallback, reason);
     setError(fallback);
   };
-  const clearAlerts = () => { setError(''); setMessage(''); };
+  const clearAlerts = () => { setError(''); setMessage(''); setUploadFeedback(null); };
   const newProduct = () => {
     clearAlerts();
     setDraft({ ...blankProduct });
@@ -225,18 +226,36 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
   };
   const saveProduct = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!db || !user) return;
+    clearAlerts();
+    if (!db || !user) {
+      setError('Your administrator session is unavailable. Sign in again before saving this product.');
+      return;
+    }
     const id = draft.id || makeSlug(draft.name);
     if (!/^[a-z0-9][a-z0-9-]{1,79}$/.test(id)) {
       setError('Use a product name that creates a URL-friendly ID with at least two characters.');
       return;
     }
-    if (!draft.image.trim()) {
-      setError('Add a product image URL or upload an image before saving.');
+    if (!draft.name.trim() || !draft.brand.trim() || !draft.family.trim() || !draft.concentration.trim()) {
+      setError('Complete the product name, brand, fragrance family, and concentration before saving.');
+      return;
+    }
+    if (!Number.isSafeInteger(Number(draft.price)) || Number(draft.price) < 0) {
+      setError('Enter a valid product price in whole Ghana cedis.');
+      return;
+    }
+    if (!Number.isSafeInteger(Number(draft.stock)) || Number(draft.stock) < 0) {
+      setError('Enter a valid whole-number stock quantity.');
+      return;
+    }
+    try {
+      const imageUrl = new URL(draft.image.trim());
+      if (imageUrl.protocol !== 'https:' && imageUrl.protocol !== 'http:') throw new Error('Unsupported image URL protocol.');
+    } catch {
+      setError('Add a valid product image URL or upload an image before saving.');
       return;
     }
     setBusy(true);
-    clearAlerts();
     try {
       const { id: _id, ...data } = draft;
       const categories = getFragranceCategories(data);
@@ -278,14 +297,20 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
     if (!file) return;
     const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
     const uploadPreset = target === 'product'
-      ? import.meta.env.VITE_CLOUDINARY_PRODUCT_UPLOAD_PRESET
+      ? import.meta.env.VITE_CLOUDINARY_PRODUCT_UPLOAD_PRESET || import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
       : import.meta.env.VITE_CLOUDINARY_STOREFRONT_UPLOAD_PRESET;
     if (!cloudName || !uploadPreset || !user) {
-      setError('Cloudinary image uploads are not configured. Run the Cloudinary setup command and reload the admin page.');
+      const text = !user
+        ? 'Your administrator session is unavailable. Sign in again before uploading an image.'
+        : 'Image uploads are not configured. Add the Cloudinary cloud name and product upload preset to .env.local, run the Cloudinary setup command, then restart the app.';
+      setError(text);
+      setUploadFeedback({ type: 'error', text });
       return;
     }
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
-      setError('Choose a JPG, PNG, or WebP image under 5 MB.');
+      const text = 'Choose a JPG, PNG, or WebP image under 5 MB.';
+      setError(text);
+      setUploadFeedback({ type: 'error', text });
       return;
     }
     setUploading(true);
@@ -342,20 +367,28 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
         const imageField = target === 'hero' ? 'heroImage' : target === 'finder' ? 'finderImage' : `${target}Image` as keyof StorefrontSettings;
         setSettingsDraft((current) => ({ ...current, [imageField]: uploadedUrl }));
       }
-      setMessage(target === 'product'
+      const text = target === 'product'
         ? 'Image uploaded to Cloudinary. Save the product to publish it.'
-        : 'Image uploaded to Cloudinary. Publish the website images to make it live.');
+        : 'Image uploaded to Cloudinary. Publish the website images to make it live.';
+      setMessage(text);
+      setUploadFeedback({ type: 'success', text });
     } catch (reason: unknown) {
       const code = typeof reason === 'object' && reason !== null && 'code' in reason
         ? String(reason.code) : '';
       if (code === 'canceled') {
-        setMessage('Image upload canceled.');
+        const text = 'Image upload canceled.';
+        setMessage(text);
+        setUploadFeedback({ type: 'error', text });
       } else if (code === 'network-request-failed') {
-        fail(reason, 'The connection to Cloudinary failed. Check your network and Cloudinary availability.');
+        const text = 'The connection to Cloudinary failed. Check your network and Cloudinary availability.';
+        fail(reason, text);
+        setUploadFeedback({ type: 'error', text });
       } else {
-        fail(reason, reason instanceof Error
+        const text = reason instanceof Error
           ? `Cloudinary upload failed${code ? ` (${code})` : ''}: ${reason.message}`
-          : `Cloudinary upload failed${code ? ` (${code})` : ''}. Check Cloudinary configuration and try again.`);
+          : `Cloudinary upload failed${code ? ` (${code})` : ''}. Check Cloudinary configuration and try again.`;
+        fail(reason, text);
+        setUploadFeedback({ type: 'error', text });
       }
     } finally {
       if (uploadRequest.current === request) uploadRequest.current = null;
@@ -595,7 +628,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
         <section className="admin-overview-quick-links"><span>STORE STATUS</span><b>{settings.heroTitle ? 'Storefront content published' : 'Storefront content needs attention'}</b><button className="text-button" onClick={() => setSection('storefront')}>Review storefront <ArrowRight size={14} /></button><button className="admin-sample-link" onClick={seedSamples} disabled={busy}>Import development sample products</button></section>
       </section>}
       {section === 'products' && <section className="admin-content"><div className="admin-section-heading"><div><h2>Product catalog</h2><p>Changes publish to the storefront as soon as they’re saved.</p></div>{!editing && <button className="primary-button" onClick={newProduct}><Plus size={16} /> Add product</button>}</div>
-        {editing ? <form className="admin-form admin-panel" onSubmit={saveProduct}><div className="admin-panel-heading"><h3>{draft.id ? 'Edit fragrance' : 'Add fragrance'}</h3><button type="button" className="icon-button" onClick={() => setEditing(false)} aria-label="Close product form"><X size={19} /></button></div>
+        {editing ? <form className="admin-form admin-panel" noValidate onSubmit={saveProduct}><div className="admin-panel-heading"><h3>{draft.id ? 'Edit fragrance' : 'Add fragrance'}</h3><button type="button" className="icon-button" onClick={() => setEditing(false)} aria-label="Close product form"><X size={19} /></button></div>
           <div className="admin-form-grid"><label className="form-label">Product name<input required value={draft.name} onChange={(e) => setDraft((current) => ({ ...current, name: e.target.value, id: current.id || makeSlug(e.target.value) }))} /></label><label className="form-label">Brand<input required value={draft.brand} onChange={(e) => setDraft((current) => ({ ...current, brand: e.target.value }))} /></label>
             <label className="form-label">Price (GH₵)<input required type="number" min="0" step="1" value={draft.price} onChange={(e) => setDraft((current) => ({ ...current, price: Number(e.target.value) }))} /></label><label className="form-label">Stock quantity<input required type="number" min="0" step="1" value={draft.stock} onChange={(e) => setDraft((current) => ({ ...current, stock: Number(e.target.value) }))} /></label>
             <fieldset className="admin-category-field"><legend>Categories <span>Select all that apply</span></legend><div className="admin-category-options">{fragranceCategories.map((category) => <label key={category}><input type="checkbox" checked={getFragranceCategories(draft).includes(category)} onChange={() => toggleProductCategory(category)} /><span>{category}</span></label>)}</div></fieldset><label className="form-label">Fragrance family<input required value={draft.family} onChange={(e) => setDraft((current) => ({ ...current, family: e.target.value }))} /></label>
@@ -603,6 +636,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
             <label className="form-label">Collection badge<select value={draft.badge || ''} onChange={(e) => setDraft((current) => ({ ...current, badge: e.target.value || undefined }))}><option value="">No badge</option><option>BEST SELLER</option><option>TRENDING</option><option>NEW ARRIVAL</option><option>ICONIC</option></select></label><label className="form-label">Product ID<input required pattern="[a-z0-9][a-z0-9-]{1,79}" value={draft.id} onChange={(e) => setDraft((current) => ({ ...current, id: makeSlug(e.target.value) }))} /></label>
             <label className="form-label admin-span-two">Main product image URL<input required type="url" value={draft.image} onChange={(e) => setDraft((current) => ({ ...current, image: e.target.value }))} /></label>
             <label className="admin-upload-button"><ImagePlus size={17} />{uploadTarget === 'product' ? `Uploading… ${uploadProgress}%` : 'Upload product image (max 5 MB)'}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { void uploadImage(e.currentTarget.files?.[0], 'product'); e.currentTarget.value = ''; }} disabled={uploading} /></label>
+            {uploadFeedback && <p className={`admin-upload-feedback ${uploadFeedback.type}`} role={uploadFeedback.type === 'error' ? 'alert' : 'status'}>{uploadFeedback.text}</p>}
             {uploadTarget === 'product' && <div className="admin-upload-status" role="status"><progress max="100" value={uploadProgress} /><span>{uploadProgress}% uploaded</span><button type="button" className="text-button" onClick={() => uploadRequest.current?.abort()}>Cancel upload</button></div>}
             {draft.image && <div className="admin-image-preview admin-product-image-preview"><img src={draft.image} alt="Product image preview" /><span>Product image preview</span></div>}
             <label className="admin-checkbox"><input type="checkbox" checked={draft.visible !== false} onChange={(e) => setDraft((current) => ({ ...current, visible: e.target.checked }))} /> Show this product in the storefront</label>

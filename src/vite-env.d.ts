@@ -11,6 +11,7 @@ interface ImportMetaEnv {
   readonly VITE_ORDER_API_URL: string | undefined;
   readonly VITE_CLOUDINARY_CLOUD_NAME: string | undefined;
   readonly VITE_CLOUDINARY_PRODUCT_UPLOAD_PRESET: string | undefined;
+  readonly VITE_CLOUDINARY_UPLOAD_PRESET: string | undefined;
   readonly VITE_CLOUDINARY_STOREFRONT_UPLOAD_PRESET: string | undefined;
 }
 

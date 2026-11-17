@@ -492,6 +492,9 @@ img { display: block; max-width: 100%; }
 .admin-upload-button { width: fit-content; min-height: 38px; display: inline-flex; align-items: center; gap: 8px; margin: 10px 0 16px; padding: 0 12px; border: 1px dashed #cfc6ba; border-radius: 3px; color: #695b4a; font-size: 9px; cursor: pointer; }
 .admin-upload-button input { display: none; }
 .admin-upload-status { grid-column: span 2; display: flex; align-items: center; gap: 10px; margin: -7px 0 10px; color: #716d67; font-size: 9px; }
+.admin-upload-feedback { grid-column: 1 / -1; margin: -8px 0 12px; font-size: 10px; line-height: 1.55; }
+.admin-upload-feedback.error { color: #8a4034; }
+.admin-upload-feedback.success { color: #486b46; }
 .admin-upload-status progress { width: min(220px, 42%); height: 7px; accent-color: var(--accent); }
 .admin-upload-status .text-button { color: #7e4033; font-size: 9px; }
 .admin-checkbox { grid-column: span 2; display: flex; align-items: center; gap: 8px; padding: 9px 0; color: #5d5851; font-size: 10px; }
