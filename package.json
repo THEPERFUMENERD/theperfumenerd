@@ -15,6 +15,7 @@
     "test:render-api": "node --test tests/render-api.test.mjs",
     "test:routes": "node --test tests/routes.test.mjs",
     "test:order-management": "node --test tests/order-management.test.mjs",
+    "test:admin-overview": "node --test tests/admin-overview.test.mjs",
     "test:pos": "firebase emulators:exec --project demo-perfume-nerd --only auth,firestore,functions \"node --test tests/pos-functions.test.mjs\"",
     "test:catalog-categories": "node --test tests/catalog-categories.test.mjs"
   },

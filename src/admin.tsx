@@ -3,12 +3,13 @@ import {
   collection, deleteDoc, doc, limit, onSnapshot, orderBy, query,
   serverTimestamp, setDoc, updateDoc,
 } from 'firebase/firestore';
-import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, ChevronDown, ClipboardList, Image as ImageIcon, ImagePlus, LayoutDashboard, MessageSquare, Package, Percent, Plus, Printer, Save, Search, Settings, ShoppingCart, Trash2, Users, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeft, ArrowRight, Banknote, Check, ChevronDown, ClipboardList, Clock3, Image as ImageIcon, ImagePlus, LayoutDashboard, MessageSquare, Package, PackageX, Percent, Plus, Printer, Save, Search, Settings, ShoppingBag, ShoppingCart, Trash2, TrendingUp, Truck, Users, X } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import { signOut } from 'firebase/auth';
 import { auth, db, isFirebaseConfigured } from './firebase';
 import { orderApi } from './order-api';
 import { formatOrderDateTime, formatOrderDay, formatOrderId, groupOrdersByDay, localDateInputValue, orderDateKey, searchOrders } from './order-management';
+import { getAdminOverviewMetrics, getRecentRevenue, revenueBarHeight } from './admin-overview';
 import { LoadedImage } from './LoadedImage';
 import { fragranceCategories, getFragranceCategories, money, products as sampleProducts, type Fragrance } from './catalog';
 import { cacheStorefrontSettings, defaultCollectionHeroSettings, defaultCollectionSettings, defaultFinderSettings, defaultHeroSettings, type StorefrontSettings } from './storefront-data';
@@ -23,6 +24,13 @@ type AdminOrder = {
   orderId: string;
   customer: { name: string; email: string; phone: string; address: string; city: string; region: string; postalCode?: string };
   items: { productId: string; name: string; brand: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number }[];
+  totalMinor: number;
+  paymentStatus: string;
+  status: string;
+  createdAt?: { toDate?: () => Date };
+};
+type AdminSale = {
+  id: string;
   totalMinor: number;
   paymentStatus: string;
   status: string;
@@ -59,6 +67,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
   const [settings, setSettings] = useState<StorefrontSettings>({});
   const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [sales, setSales] = useState<AdminSale[]>([]);
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
   const [totalUsers, setTotalUsers] = useState<number | null>(null);
   const [nextUsersPage, setNextUsersPage] = useState<string | null>(null);
@@ -110,7 +119,14 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
       console.error('Admin order listener failed.', reason);
       setError('Could not load customer orders. Publish the latest Firestore rules and confirm administrator access.');
     });
-    return () => { stopProducts(); stopSettings(); stopFeedback(); stopOrders(); };
+    const salesQuery = query(collection(db, 'sales'), orderBy('createdAt', 'desc'));
+    const stopSales = onSnapshot(salesQuery, (snapshot) => {
+      setSales(snapshot.docs.map((entry) => ({ ...entry.data(), id: entry.id }) as AdminSale));
+    }, (reason) => {
+      console.error('Admin POS sales listener failed.', reason);
+      setError('Could not load POS sales for the dashboard. Confirm administrator access and Firestore rules.');
+    });
+    return () => { stopProducts(); stopSettings(); stopFeedback(); stopOrders(); stopSales(); };
   }, [isAdmin]);
 
   useEffect(() => {
@@ -135,6 +151,27 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
     return () => { active = false; };
   }, [section, isAdmin]);
 
+  useEffect(() => {
+    if (section !== 'overview' || !isAdmin || totalUsers !== null) return;
+    let active = true;
+    setUsersLoading(true);
+    orderApi<{ users: AdminUser[]; nextPageToken: string | null; totalUsers: number }>(
+      '/api/admin/users',
+      {},
+    ).then((data) => {
+      if (!active) return;
+      setTotalUsers(data.totalUsers);
+      setAdminUsers(data.users);
+      setNextUsersPage(data.nextPageToken);
+    }).catch((reason: unknown) => {
+      console.error('Could not load the dashboard customer count.', reason);
+      if (active) setError('Customer account totals are temporarily unavailable.');
+    }).finally(() => {
+      if (active) setUsersLoading(false);
+    });
+    return () => { active = false; };
+  }, [section, isAdmin, totalUsers]);
+
   const visibleProducts = useMemo(() => products.filter((item) =>
     `${item.name} ${item.brand}`.toLowerCase().includes(search.toLowerCase())), [products, search]);
   const filteredOrders = useMemo(() => searchOrders(orders, orderSearch), [orders, orderSearch]);
@@ -144,6 +181,15 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
     [orders, printDate],
   );
   const newFeedbackCount = feedback.filter((item) => item.status === 'new').length;
+  const todayKey = localDateInputValue(new Date());
+  const overviewMetrics = useMemo(() => getAdminOverviewMetrics(orders, sales, todayKey), [orders, sales, todayKey]);
+  const revenueHistory = useMemo(() => getRecentRevenue(orders, sales, todayKey), [orders, sales, todayKey]);
+  const maxDailyRevenue = Math.max(...revenueHistory.map((entry) => entry.revenueMinor), 0);
+  const lowStockProducts = products
+    .filter((product) => (product as Fragrance & { visible?: boolean }).visible !== false && product.stock <= 3)
+    .sort((left, right) => left.stock - right.stock);
+  const liveProductCount = products.filter((product) => (product as Fragrance & { visible?: boolean }).visible !== false).length;
+  const outOfStockCount = lowStockProducts.filter((product) => product.stock === 0).length;
   const fail = (reason: unknown, fallback: string) => {
     console.error(fallback, reason);
     setError(fallback);
@@ -492,11 +538,58 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
     <div className="admin-main">
       <header className="admin-topbar"><div><span className="eyebrow">THE PERFUME NERD</span><h1>{sections.find((item) => item.id === section)?.label}</h1></div><div className="admin-top-actions"><a className="outline-button admin-store-link" href="/" onClick={(event) => { event.preventDefault(); history.pushState({}, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); }}><ArrowLeft size={15} /> View storefront</a><button className="admin-signout" onClick={() => void logoutAdmin()}>Sign out</button></div></header>
       {(error || message) && <div className={`admin-alert ${error ? 'error' : 'success'}`} role={error ? 'alert' : 'status'}>{error || message}<button onClick={clearAlerts} aria-label="Dismiss message"><X size={15} /></button></div>}
-      {section === 'overview' && <section className="admin-content"><div className="admin-welcome"><div><div className="eyebrow">STORE CONTROL CENTER</div><h2>Good to have you back.</h2><p>Manage your storefront and follow up on customer feedback.</p></div><button className="primary-button" onClick={newProduct}><Plus size={16} /> Add a product</button></div>
-        <div className="admin-stat-grid"><article><span>LIVE PRODUCTS</span><strong>{products.filter((item) => (item as Fragrance & { visible?: boolean }).visible !== false).length}</strong><small>In your catalog</small></article><article><span>OUT OF STOCK</span><strong>{products.filter((item) => item.stock <= 0).length}</strong><small>Review availability</small></article><article><span>NEW FEEDBACK</span><strong>{newFeedbackCount}</strong><small>Awaiting review</small></article><article><span>STORE CONTENT</span><strong>{settings.heroTitle ? 'Ready' : 'Draft'}</strong><small>Homepage presentation</small></article></div>
-        <div className="admin-overview-grid"><section className="admin-panel"><div className="admin-panel-heading"><h3>Recent products</h3><button className="text-button" onClick={() => setSection('products')}>Manage all <ArrowLeft size={14} /></button></div>{products.slice(0, 5).map((product) => <div className="admin-mini-product" key={product.id}><img src={product.image} alt="" /><span><strong>{product.name}</strong><small>{product.brand}</small></span><b>{money(product.price)}</b></div>)}{products.length === 0 && <p className="admin-empty-note">No products yet. Add verified products or import the development samples.</p>}</section>
-          <section className="admin-panel"><div className="admin-panel-heading"><h3>Latest feedback</h3><button className="text-button" onClick={() => setSection('feedback')}>Open inbox <ArrowLeft size={14} /></button></div>{feedback.slice(0, 4).map((item) => <article className="admin-feedback-mini" key={item.id}><span className={`feedback-status ${item.status}`}>{item.status}</span><p>{item.message}</p><small>{item.name || 'Guest'}{item.email ? ` · ${item.email}` : ''}</small></article>)}{feedback.length === 0 && <p className="admin-empty-note">Customer feedback sent from the storefront will appear here live.</p>}</section>
-        </div><button className="admin-sample-link" onClick={seedSamples} disabled={busy}>Import development sample products</button>
+      {section === 'overview' && <section className="admin-content admin-overview-content">
+        <div className="admin-welcome admin-overview-welcome"><div><div className="admin-overview-kicker"><span className="admin-live-dot" /> LIVE STORE OVERVIEW <span>ACCRA · GHANA</span></div><h2>Good to have you back.</h2><p>Your sales, orders and store operations at a glance.</p></div><div className="admin-overview-actions"><span className="admin-overview-date">{new Intl.DateTimeFormat(undefined, { timeZone: 'Africa/Accra', weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())}</span><button className="primary-button" onClick={newProduct}><Plus size={16} /> Add a product</button></div></div>
+        <div className="admin-overview-section-label"><span>BUSINESS PERFORMANCE</span><small>All revenue in Ghana cedis · paid orders and completed POS sales</small></div>
+        <div className="admin-stat-grid admin-overview-stats">
+          <article className="admin-stat-revenue"><span><Banknote size={16} /> TOTAL REVENUE</span><strong>{money(overviewMetrics.revenueMinor / 100)}</strong><small>All-time confirmed sales</small></article>
+          <article className="admin-stat-today"><span><TrendingUp size={16} /> TODAY'S REVENUE</span><strong>{money(overviewMetrics.todayRevenueMinor / 100)}</strong><small>Accra business day</small></article>
+          <article><span><ClipboardList size={16} /> TOTAL ORDERS</span><strong>{overviewMetrics.totalOrders}</strong><small>Online orders + POS sales</small></article>
+          <article><span><Clock3 size={16} /> TODAY'S ORDERS</span><strong>{overviewMetrics.todayOrders}</strong><small>{overviewMetrics.posSalesToday} POS sales today</small></article>
+          <article><span><Truck size={16} /> TO FULFIL</span><strong>{overviewMetrics.activeFulfillment}</strong><small>Paid, not yet delivered</small></article>
+          <article><span><Clock3 size={16} /> AWAITING PAYMENT</span><strong>{overviewMetrics.pendingPayment}</strong><small>Online payment pending</small></article>
+          <article><span><ShoppingCart size={16} /> POS SALES TODAY</span><strong>{overviewMetrics.posSalesToday}</strong><small>Completed cash transactions</small></article>
+          <article><span><ShoppingBag size={16} /> LIVE PRODUCTS</span><strong>{liveProductCount}</strong><small>Published in the storefront</small></article>
+          <article><span><PackageX size={16} /> LOW STOCK</span><strong>{lowStockProducts.length}</strong><small>Visible products with 3 or fewer</small></article>
+          <article><span><PackageX size={16} /> OUT OF STOCK</span><strong>{outOfStockCount}</strong><small>Visible items unavailable to buy</small></article>
+          <article><span><MessageSquare size={16} /> NEW FEEDBACK</span><strong>{newFeedbackCount}</strong><small>Messages awaiting review</small></article>
+          <article><span><Users size={16} /> CUSTOMERS</span><strong>{totalUsers === null ? (usersLoading ? '…' : '—') : totalUsers}</strong><small>Registered accounts</small></article>
+        </div>
+        <div className="admin-overview-main-grid">
+          <section className="admin-panel admin-revenue-panel">
+            <div className="admin-panel-heading"><div><span className="admin-panel-kicker">REVENUE</span><h3>Last seven days</h3></div><span className="admin-panel-period">GHS</span></div>
+            <div className="admin-revenue-chart" role="img" aria-label="Daily confirmed online and POS revenue for the last seven days">
+              {revenueHistory.map(({ date, revenueMinor }) => <div className="admin-revenue-day" key={date} title={`${formatOrderDay(date)}: ${money(revenueMinor / 100)}`}>
+                <div className="admin-revenue-bar-track"><span className={revenueMinor > 0 ? 'has-revenue' : ''} style={{ height: `${revenueBarHeight(revenueMinor, maxDailyRevenue)}%` }} /></div>
+                <small>{new Intl.DateTimeFormat(undefined, { timeZone: 'Africa/Accra', weekday: 'short' }).format(new Date(`${date}T12:00:00Z`))}</small>
+                <strong>{revenueMinor ? money(revenueMinor / 100) : '—'}</strong>
+              </div>)}
+            </div>
+            <p className="admin-chart-caption">Revenue counts successful online payments and completed POS cash sales only.</p>
+          </section>
+          <section className="admin-panel admin-activity-panel">
+            <div className="admin-panel-heading"><div><span className="admin-panel-kicker">ORDER ACTIVITY</span><h3>Recent orders</h3></div><button className="text-button" onClick={() => setSection('orders')}>View all <ArrowRight size={14} /></button></div>
+            {orders.slice(0, 5).map((order) => <button type="button" className="admin-overview-order" key={order.orderId} onClick={() => setSection('orders')}>
+              <span className={`admin-activity-indicator ${order.paymentStatus === 'paid' ? 'paid' : ''}`} />
+              <span className="admin-overview-order-copy"><strong>{order.customer.name || 'Customer order'}</strong><small>{formatOrderId(order.orderId)} · {formatOrderDateTime(order.createdAt)}</small></span>
+              <span className="admin-overview-order-total">{money(order.totalMinor / 100)}<small>{order.paymentStatus.replaceAll('_', ' ')}</small></span>
+            </button>)}
+            {orders.length === 0 && <p className="admin-empty-note">New online orders will appear here.</p>}
+          </section>
+        </div>
+        <div className="admin-overview-lower-grid">
+          <section className="admin-panel admin-inventory-panel">
+            <div className="admin-panel-heading"><div><span className="admin-panel-kicker">INVENTORY</span><h3>Stock watch</h3></div><button className="text-button" onClick={() => setSection('products')}>Manage products <ArrowRight size={14} /></button></div>
+            {lowStockProducts.slice(0, 5).map((product) => <div className="admin-stock-row" key={product.id}><span className={`admin-stock-indicator ${product.stock === 0 ? 'empty' : ''}`} /><span><strong>{product.name}</strong><small>{product.brand}</small></span><b className={product.stock === 0 ? 'out' : ''}>{product.stock === 0 ? 'Out of stock' : `${product.stock} left`}</b></div>)}
+            {lowStockProducts.length === 0 && <p className="admin-empty-note">No visible products are at low stock.</p>}
+          </section>
+          <section className="admin-panel admin-feedback-panel">
+            <div className="admin-panel-heading"><div><span className="admin-panel-kicker">CUSTOMER VOICE</span><h3>Latest feedback</h3></div><button className="text-button" onClick={() => setSection('feedback')}>Open inbox <ArrowRight size={14} /></button></div>
+            {feedback.slice(0, 3).map((item) => <article className="admin-feedback-mini" key={item.id}><span className={`feedback-status ${item.status}`}>{item.status}</span><p>{item.message}</p><small>{item.name || 'Guest'}{item.email ? ` · ${item.email}` : ''}</small></article>)}
+            {feedback.length === 0 && <p className="admin-empty-note">Customer feedback from the storefront will appear here.</p>}
+          </section>
+        </div>
+        <section className="admin-overview-quick-links"><span>STORE STATUS</span><b>{settings.heroTitle ? 'Storefront content published' : 'Storefront content needs attention'}</b><button className="text-button" onClick={() => setSection('storefront')}>Review storefront <ArrowRight size={14} /></button><button className="admin-sample-link" onClick={seedSamples} disabled={busy}>Import development sample products</button></section>
       </section>}
       {section === 'products' && <section className="admin-content"><div className="admin-section-heading"><div><h2>Product catalog</h2><p>Changes publish to the storefront as soon as they’re saved.</p></div>{!editing && <button className="primary-button" onClick={newProduct}><Plus size={16} /> Add product</button>}</div>
         {editing ? <form className="admin-form admin-panel" onSubmit={saveProduct}><div className="admin-panel-heading"><h3>{draft.id ? 'Edit fragrance' : 'Add fragrance'}</h3><button type="button" className="icon-button" onClick={() => setEditing(false)} aria-label="Close product form"><X size={19} /></button></div>
