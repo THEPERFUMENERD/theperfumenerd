@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculateOnlineOrderItems, validateOnlineOrder } from '../functions/index.js';
+import { calculateOnlineOrderItems, generateOnlineOrderId, isValidOnlineOrderId, validateOnlineOrder } from '../functions/index.js';
 
 const productSnapshot = (data) => ({ exists: true, data: () => data });
 const customer = {
@@ -28,6 +28,15 @@ test('checkout accepts bounded customer data and normalized product quantities',
   });
   assert.equal(result.customer.email, 'buyer@example.com');
   assert.deepEqual(result.items, [{ productId: 'signature', quantity: 2 }]);
+});
+
+test('new short order IDs and legacy order IDs remain valid', () => {
+  const generated = generateOnlineOrderId();
+  assert.match(generated, /^TPN-[A-F0-9]{7}$/);
+  assert.equal(isValidOnlineOrderId(generated), true);
+  assert.equal(isValidOnlineOrderId('TPN-08F74DE'), true);
+  assert.equal(isValidOnlineOrderId('TPN-20261117-0DB015E7842DF2269C4730051C3E9546'), true);
+  assert.equal(isValidOnlineOrderId('TPN-TOO-LONG'), false);
 });
 
 test('checkout rejects repeated lines, invalid quantities and incomplete delivery details', () => {

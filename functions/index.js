@@ -20,6 +20,9 @@ const PUBLIC_STORE_URL = process.env.FUNCTIONS_EMULATOR === 'true'
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const normalizedEmail = (value) => typeof value === 'string' ? value.trim().toLowerCase() : '';
+export const isValidOnlineOrderId = (value) => typeof value === 'string'
+  && (/^TPN-[A-F0-9]{7}$/i.test(value) || /^TPN-\d{8}-[A-F0-9]{32}$/i.test(value));
+export const generateOnlineOrderId = () => `TPN-${randomBytes(4).toString('hex').slice(0, 7).toUpperCase()}`;
 
 export function calculateOnlineOrderItems(inputItems, productDocuments, settings = {}) {
   const selectedPrices = new Map(
@@ -178,8 +181,8 @@ async function recordSuccessfulOnlinePayment(reference, payment) {
 
 export const initializePaystackOrder = onCall(async (request) => {
   const { customer, items: requestedItems } = validateOnlineOrder(request.data);
-  const orderId = `TPN-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${randomBytes(16).toString('hex').toUpperCase()}`;
-  const orderRef = db.collection('orders').doc(orderId);
+  let orderId = '';
+  let orderRef;
   const settingsRef = db.collection('storeSettings').doc('public');
   const productRefs = requestedItems.map((item) => db.collection('products').doc(item.productId));
   let order;
@@ -187,6 +190,18 @@ export const initializePaystackOrder = onCall(async (request) => {
   await db.runTransaction(async (transaction) => {
     const settingsSnapshot = await transaction.get(settingsRef);
     const productSnapshots = await Promise.all(productRefs.map((reference) => transaction.get(reference)));
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const candidateId = generateOnlineOrderId();
+      const candidateRef = db.collection('orders').doc(candidateId);
+      if (!(await transaction.get(candidateRef)).exists) {
+        orderId = candidateId;
+        orderRef = candidateRef;
+        break;
+      }
+    }
+    if (!orderRef) {
+      throw new HttpsError('resource-exhausted', 'Could not reserve a unique order ID. Please try again.');
+    }
     const productDocuments = new Map(requestedItems.map((item, index) => [item.productId, productSnapshots[index]]));
     const pricedItems = calculateOnlineOrderItems(
       requestedItems,
@@ -249,7 +264,7 @@ export const initializePaystackOrder = onCall(async (request) => {
 
 export const verifyPaystackOrder = onCall(async (request) => {
   const reference = typeof request.data?.reference === 'string' ? request.data.reference.trim() : '';
-  if (!/^TPN-\d{8}-[A-F0-9]{32}$/.test(reference)) {
+  if (!isValidOnlineOrderId(reference)) {
     throw new HttpsError('invalid-argument', 'Enter a valid order reference.');
   }
   const orderSnapshot = await db.collection('orders').doc(reference).get();
@@ -280,10 +295,20 @@ export const verifyPaystackOrder = onCall(async (request) => {
 export const lookupGuestOrder = onCall(async (request) => {
   const orderId = typeof request.data?.orderId === 'string' ? request.data.orderId.trim().toUpperCase() : '';
   const email = normalizedEmail(request.data?.email);
-  if (!/^TPN-\d{8}-[A-F0-9]{32}$/.test(orderId) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!isValidOnlineOrderId(orderId) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new HttpsError('invalid-argument', 'Enter a valid order ID and checkout email.');
   }
-  const snapshot = await db.collection('orders').doc(orderId).get();
+  let snapshot = await db.collection('orders').doc(orderId).get();
+  if (!snapshot.exists && /^TPN-[A-F0-9]{7}$/i.test(orderId)) {
+    const matches = await db.collection('orders')
+      .where('customer.email', '==', email)
+      .limit(500)
+      .get();
+    snapshot = matches.docs.find((entry) => {
+      const legacyReference = /^TPN-\d{8}-([A-F0-9]{32})$/i.exec(entry.id);
+      return legacyReference && `TPN-${legacyReference[1].slice(0, 7)}` === orderId;
+    }) ?? snapshot;
+  }
   if (!snapshot.exists || snapshot.data().userId !== null || snapshot.data().customer?.email !== email) {
     throw new HttpsError('not-found', 'No guest order matched that order ID and email.');
   }
@@ -347,7 +372,7 @@ export const updateOnlineOrderStatus = onCall(async (request) => {
   }
   const { orderId, status } = request.data ?? {};
   const allowedStatuses = ['processing', 'ready_for_dispatch', 'dispatched', 'delivered'];
-  if (typeof orderId !== 'string' || !/^TPN-\d{8}-[A-F0-9]{32}$/.test(orderId)
+  if (!isValidOnlineOrderId(orderId)
     || !allowedStatuses.includes(status)) {
     throw new HttpsError('invalid-argument', 'Choose a valid order and fulfillment status.');
   }

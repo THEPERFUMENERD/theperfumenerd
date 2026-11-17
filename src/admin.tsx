@@ -3,11 +3,12 @@ import {
   collection, deleteDoc, doc, limit, onSnapshot, orderBy, query,
   serverTimestamp, setDoc, updateDoc,
 } from 'firebase/firestore';
-import { ArrowLeft, ArrowRight, Check, ClipboardList, Image as ImageIcon, ImagePlus, LayoutDashboard, MessageSquare, Package, Percent, Plus, Save, Search, Settings, ShoppingCart, Trash2, Users, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, ChevronDown, ClipboardList, Image as ImageIcon, ImagePlus, LayoutDashboard, MessageSquare, Package, Percent, Plus, Printer, Save, Search, Settings, ShoppingCart, Trash2, Users, X } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import { signOut } from 'firebase/auth';
 import { auth, db, isFirebaseConfigured } from './firebase';
 import { orderApi } from './order-api';
+import { formatOrderDateTime, formatOrderDay, formatOrderId, groupOrdersByDay, localDateInputValue, orderDateKey, searchOrders } from './order-management';
 import { LoadedImage } from './LoadedImage';
 import { fragranceCategories, getFragranceCategories, money, products as sampleProducts, type Fragrance } from './catalog';
 import { cacheStorefrontSettings, defaultCollectionHeroSettings, defaultCollectionSettings, defaultFinderSettings, defaultHeroSettings, type StorefrontSettings } from './storefront-data';
@@ -65,6 +66,9 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
   const [draft, setDraft] = useState<ProductDraft>(blankProduct);
   const [editing, setEditing] = useState(false);
   const [search, setSearch] = useState('');
+  const [orderSearch, setOrderSearch] = useState('');
+  const [printDialogOpen, setPrintDialogOpen] = useState(false);
+  const [printDate, setPrintDate] = useState(() => localDateInputValue(new Date()));
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -99,7 +103,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
       console.error('Admin feedback listener failed.', reason);
       setError('Could not load customer feedback. Confirm the feedback collection rules.');
     });
-    const ordersQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(100));
+    const ordersQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
     const stopOrders = onSnapshot(ordersQuery, (snapshot) => {
       setOrders(snapshot.docs.map((entry) => ({ ...entry.data(), orderId: entry.id }) as AdminOrder));
     }, (reason) => {
@@ -133,6 +137,12 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
 
   const visibleProducts = useMemo(() => products.filter((item) =>
     `${item.name} ${item.brand}`.toLowerCase().includes(search.toLowerCase())), [products, search]);
+  const filteredOrders = useMemo(() => searchOrders(orders, orderSearch), [orders, orderSearch]);
+  const groupedOrders = useMemo(() => groupOrdersByDay(filteredOrders), [filteredOrders]);
+  const selectedPrintOrders = useMemo(
+    () => orders.filter((order) => orderDateKey(order.createdAt) === printDate),
+    [orders, printDate],
+  );
   const newFeedbackCount = feedback.filter((item) => item.status === 'new').length;
   const fail = (reason: unknown, fallback: string) => {
     console.error(fallback, reason);
@@ -504,22 +514,52 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
         </form> : <div className="admin-panel"><div className="admin-list-toolbar"><label className="admin-search"><Search size={16} /><input placeholder="Search products or brands" value={search} onChange={(e) => setSearch(e.target.value)} /></label><span>{visibleProducts.length} products</span></div>
           <div className="admin-product-list">{visibleProducts.map((product) => <article className="admin-product-row" key={product.id}><img src={product.image} alt="" /><div className="admin-product-info"><strong>{product.name}</strong><span>{product.brand} · {getFragranceCategories(product).join(', ')}</span><small>{product.stock > 0 ? `${product.stock} in stock` : 'Out of stock'}</small></div><b>{money(product.price)}</b><span className={`visibility-pill ${(product as Fragrance & { visible?: boolean }).visible === false ? 'hidden' : ''}`}>{(product as Fragrance & { visible?: boolean }).visible === false ? 'Hidden' : 'Live'}</span><button className="outline-button admin-edit-button" onClick={() => editProduct(product)}>Edit</button><button className="icon-button admin-delete-button" onClick={() => void removeProduct(product)} aria-label={`Delete ${product.name}`}><Trash2 size={16} /></button></article>)}{visibleProducts.length === 0 && <p className="admin-empty-note">No matching products. Add a fragrance or import development samples.</p>}</div></div>}
       </section>}
-      {section === 'orders' && <section className="admin-content"><div className="admin-section-heading"><div><h2>Customer orders</h2><p>Payment-confirmed orders and delivery details, updating live.</p></div><span className="feedback-count">{orders.length} recent</span></div>
-        <div className="admin-orders-list">{orders.map((order) => <article className="admin-order-card" key={order.orderId}>
-          <header className="admin-order-heading"><div><span className="eyebrow">ORDER ID</span><strong>{order.orderId}</strong><small>{order.createdAt?.toDate?.().toLocaleString() ?? 'Date unavailable'}</small></div>
-            <div className="admin-order-controls"><span className={`order-status-pill ${order.paymentStatus === 'paid' ? 'paid' : ''}`}>{order.paymentStatus.replaceAll('_', ' ')}</span>
-              <label className="admin-status-select"><span>Fulfillment</span><select aria-label={`Update status for ${order.orderId}`} value={order.status} disabled={busy || order.paymentStatus !== 'paid'} onChange={(event) => void updateOrderStatus(order.orderId, event.target.value)}>
-                {!['paid_needs_review', 'processing', 'ready_for_dispatch', 'dispatched', 'delivered'].includes(order.status) && <option value={order.status}>{order.status.replaceAll('_', ' ')}</option>}
-                {order.status === 'paid_needs_review' && <option value="paid_needs_review">Needs stock review</option>}
-                {['processing', 'ready_for_dispatch', 'dispatched', 'delivered'].map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}
-              </select></label>
+      {section === 'orders' && <section className="admin-content admin-orders-content"><div className="admin-section-heading"><div><h2>Customer orders</h2><p>Payment-confirmed orders and delivery details, updating live.</p></div><span className="feedback-count">{orders.length} total</span></div>
+        <div className="admin-order-toolbar">
+          <label className="admin-search"><Search size={16} /><input aria-label="Search orders" placeholder="Search order ID, customer, email or phone" value={orderSearch} onChange={(event) => setOrderSearch(event.target.value)} /></label>
+          <button type="button" className="outline-button admin-print-trigger" onClick={() => setPrintDialogOpen(true)}><Printer size={16} /> Print / Save daily PDF</button>
+        </div>
+        {groupedOrders.length > 0 ? groupedOrders.map(({ date, orders: dayOrders }) => <section className="admin-order-day" key={date}>
+          <header className="admin-order-day-heading"><h3>{date === 'unknown' ? 'Date unavailable' : formatOrderDay(date)}</h3><span>{dayOrders.length} {dayOrders.length === 1 ? 'order' : 'orders'}</span></header>
+          <div className="admin-orders-list">{dayOrders.map((order) => <details className="admin-order-card" key={order.orderId}>
+            <summary className="admin-order-summary"><span><small>ORDER ID</small><strong>{formatOrderId(order.orderId)}</strong></span><strong className="admin-order-summary-total">{money(order.totalMinor / 100)}</strong><ChevronDown size={17} className="admin-order-chevron" aria-hidden="true" /></summary>
+            <div className="admin-order-expanded">
+              <header className="admin-order-heading"><div><span className="eyebrow">ORDER DETAILS</span><strong>{formatOrderId(order.orderId)}</strong><small>{formatOrderDateTime(order.createdAt)}</small></div>
+                <div className="admin-order-controls"><span className={`order-status-pill ${order.paymentStatus === 'paid' ? 'paid' : ''}`}>{order.paymentStatus.replaceAll('_', ' ')}</span>
+                  <label className="admin-status-select"><span>Fulfillment</span><select aria-label={`Update status for ${formatOrderId(order.orderId)}`} value={order.status} disabled={busy || order.paymentStatus !== 'paid'} onChange={(event) => void updateOrderStatus(order.orderId, event.target.value)}>
+                    {!['paid_needs_review', 'processing', 'ready_for_dispatch', 'dispatched', 'delivered'].includes(order.status) && <option value={order.status}>{order.status.replaceAll('_', ' ')}</option>}
+                    {order.status === 'paid_needs_review' && <option value="paid_needs_review">Needs stock review</option>}
+                    {['processing', 'ready_for_dispatch', 'dispatched', 'delivered'].map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}
+                  </select></label>
+                </div>
+              </header>
+              <div className="admin-order-details"><section><h3>Customer & delivery</h3><p><strong>{order.customer.name}</strong></p><p>{order.customer.email} · {order.customer.phone}</p><p>{order.customer.address}, {order.customer.city}, {order.customer.region}{order.customer.postalCode ? ` · ${order.customer.postalCode}` : ''}</p></section>
+                <section><h3>Items purchased</h3>{order.items.map((item) => <p className="admin-order-item" key={item.productId}><span>{item.name} · {item.brand} × {item.quantity}</span><strong>{money(item.lineTotalMinor / 100)}</strong></p>)}</section>
+              </div>
+              <footer className="admin-order-total"><span>{order.paymentStatus === 'paid' ? 'Amount paid · GHS' : 'Payment · GHS'}</span><strong>{money(order.totalMinor / 100)}</strong></footer>
             </div>
-          </header>
-          <div className="admin-order-details"><section><h3>Customer & delivery</h3><p><strong>{order.customer.name}</strong></p><p>{order.customer.email} · {order.customer.phone}</p><p>{order.customer.address}, {order.customer.city}, {order.customer.region}{order.customer.postalCode ? ` · ${order.customer.postalCode}` : ''}</p></section>
-            <section><h3>Items purchased</h3>{order.items.map((item) => <p className="admin-order-item" key={item.productId}><span>{item.name} · {item.brand} × {item.quantity}</span><strong>{money(item.lineTotalMinor / 100)}</strong></p>)}</section>
-          </div>
-          <footer className="admin-order-total"><span>{order.paymentStatus === 'paid' ? 'Amount paid · GHS' : 'Payment · GHS'}</span><strong>{money(order.totalMinor / 100)}</strong></footer>
-        </article>)}{orders.length === 0 && <div className="admin-panel admin-empty-note">Customer orders will appear here after checkout.</div>}</div>
+          </details>)}</div>
+        </section>) : <div className="admin-panel admin-empty-note">{orders.length === 0 ? 'Customer orders will appear here after checkout.' : 'No orders match your search.'}</div>}
+        {printDialogOpen && <div className="admin-print-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPrintDialogOpen(false); }}>
+          <section className="admin-print-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-print-title">
+            <button type="button" className="icon-button admin-print-close" aria-label="Close print dialog" onClick={() => setPrintDialogOpen(false)}><X size={18} /></button>
+            <span className="eyebrow">DAILY ORDER REPORT</span><h2 id="admin-print-title">Choose an order date</h2>
+            <label className="form-label">Date<input type="date" value={printDate} onChange={(event) => setPrintDate(event.target.value)} /></label>
+            <p>{selectedPrintOrders.length} {selectedPrintOrders.length === 1 ? 'order' : 'orders'} for this date. Use the print dialog to print or save as PDF.</p>
+            <div className="admin-form-actions"><button type="button" className="outline-button" onClick={() => setPrintDialogOpen(false)}>Cancel</button><button type="button" className="primary-button" disabled={!selectedPrintOrders.length} onClick={() => window.print()}><ArrowDownToLine size={16} /> Print / Save PDF</button></div>
+          </section>
+        </div>}
+        <div className="admin-order-print-sheet" aria-hidden="true">
+          <h1>THE PERFUME NERD — Daily Orders</h1>
+          <h2>{formatOrderDay(printDate)}</h2>
+          <p>{selectedPrintOrders.length} {selectedPrintOrders.length === 1 ? 'order' : 'orders'}</p>
+          {selectedPrintOrders.map((order) => <article className="admin-order-print-card" key={order.orderId}>
+            <header><div><strong>{formatOrderId(order.orderId)}</strong><small>{formatOrderDateTime(order.createdAt)}</small></div><strong>{money(order.totalMinor / 100)}</strong></header>
+            <p><strong>{order.customer.name}</strong><br />{order.customer.email} · {order.customer.phone}<br />{order.customer.address}, {order.customer.city}, {order.customer.region}{order.customer.postalCode ? ` · ${order.customer.postalCode}` : ''}</p>
+            <ul>{order.items.map((item) => <li key={item.productId}>{item.name} · {item.brand} × {item.quantity} — {money(item.lineTotalMinor / 100)}</li>)}</ul>
+            <footer>{order.paymentStatus.replaceAll('_', ' ')} · {order.status.replaceAll('_', ' ')}</footer>
+          </article>)}
+        </div>
       </section>}
       {section === 'users' && <section className="admin-content"><div className="admin-section-heading"><div><h2>Registered users</h2><p>Customer accounts and saved contact numbers.</p></div><span className="feedback-count">{totalUsers === null ? (usersLoading ? 'Loading…' : '—') : `${totalUsers} total`}</span></div>
         <div className="admin-users-list">{adminUsers.map((account) => <article className="admin-user-row" key={account.uid}><span className="admin-user-avatar">{(account.name || account.email || 'U').slice(0, 1).toUpperCase()}</span><div><strong>{account.name || 'Name not provided'}</strong><span>{account.email || 'No email'} · {account.phoneNumber || 'No phone number'}</span></div></article>)}
