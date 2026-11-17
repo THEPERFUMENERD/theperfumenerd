@@ -13,7 +13,7 @@ Create a production bundle with `npm.cmd run build`.
 
 ## Render uptime
 
-The GitHub Actions workflow at `.github/workflows/keep-render-awake.yml` requests the Render storefront every 5 minutes. It runs only after the workflow is pushed to the repository's default branch and GitHub Actions/scheduled workflows are enabled. Scheduled workflows are best-effort and GitHub may delay runs, so this free ping can reduce idle sleeps but cannot guarantee uninterrupted availability.
+The GitHub Actions workflow at `.github/workflows/keep-render-awake.yml` requests both the Render storefront and order API every 5 minutes. It runs only after the workflow is pushed to the repository's default branch and GitHub Actions/scheduled workflows are enabled. Scheduled workflows are best-effort and GitHub may delay runs, so these free pings can reduce idle sleeps but cannot guarantee uninterrupted availability.
 
 ## Firebase email and Google sign-in
 
@@ -71,7 +71,7 @@ Deploy the Functions runtime as well as Firestore/Storage rules before using the
 .\node_modules\.bin\firebase.cmd deploy --only functions,firestore:rules,storage
 ```
 
-Cloud Functions deployment requires an eligible Firebase billing plan and an authenticated, authorized Firebase CLI. App Check is not enforced by the callable because this project does not yet configure App Check; the callable still enforces the Firebase identity and admin authorization server-side.
+Firebase Functions deployment for the POS requires an eligible Firebase billing plan and an authenticated, authorized Firebase CLI. App Check is not enforced by the callable because this project does not yet configure App Check; the callable still enforces the Firebase identity and admin authorization server-side. Online Paystack orders use the Render API described below instead.
 
 This is the initial POS slice, not the complete master specification: it supports existing catalog products and confirmed cash sales. The online Paystack flow below also deducts shared stock after verified payment. Product variants and barcode/SKU fields, customer database linking, split payments, tax configuration, refunds/returns, manager/cashier roles, registers/shifts, multi-branch inventory, sales-history/reporting screens, and offline synchronization are not implemented. Do not treat the combined POS and online store as a complete retail system until these capabilities and production operational controls are added and verified.
 
@@ -83,27 +83,34 @@ The storefront currently implements responsive collection browsing, search, cate
 
 ### Paystack checkout and order management
 
-The Paystack secret is used only by Firebase Functions, not by the browser. Add `PAYSTACK_SECRET_KEY=...` to the ignored root `.env.local` file (without a `VITE_` prefix), then run:
+The storefront uses the separate `the-perfume-nerd-api` Render web service for online order initialization, payment verification, guest order lookup, admin order updates, and administrator user listing. The Render blueprint is in `render.yaml`; create the service from the repository's Render Blueprint dashboard. The free Render service may sleep while idle, so the first request after inactivity can take longer.
+
+Set these private values in the Render service's **Environment** settings. Never commit or send either credential to the repository:
+
+- `PAYSTACK_SECRET_KEY`: the Paystack test or live secret key.
+- `FIREBASE_SERVICE_ACCOUNT`: the complete JSON contents of a Firebase service-account key with permission to read and update Firestore orders/products and list Firebase Authentication users.
+
+Create/download the service-account JSON from Firebase project settings and paste the complete JSON as the Render environment variable value. Keep the downloaded file private and delete the local copy after configuring Render. The service uses Firebase Admin SDK server-side; this credential is not sent to browsers. `FIREBASE_PROJECT_ID`, `PUBLIC_STORE_URL`, and `ALLOWED_ORIGINS` are set by `render.yaml`. Add any custom storefront origin to `ALLOWED_ORIGINS` if needed.
+
+The storefront defaults to `https://the-perfume-nerd-api.onrender.com`; override it locally or for a different Render service with `VITE_ORDER_API_URL` in the ignored root `.env.local` file. No Firebase Functions deployment is required for online Paystack orders. The optional helper below configures the secret for the Firebase Functions emulator only:
 
 ```powershell
 npm.cmd run paystack:configure
 ```
 
-This writes the value to the ignored `functions/.env.the-perfume-nerd` file, which Firebase Functions loads as a server environment variable. It is not exposed as a `VITE_` browser setting. Deploy the Functions and current Firestore rules with:
+This writes the value from root `.env.local` to the ignored `functions/.env.the-perfume-nerd` file. It is not exposed as a `VITE_` browser setting. For local function-emulator tests only, deploy Firestore rules with:
 
 ```powershell
-.\node_modules\.bin\firebase.cmd deploy --only functions,firestore:rules --project the-perfume-nerd
+.\node_modules\.bin\firebase.cmd deploy --only firestore:rules --project the-perfume-nerd
 ```
 
-This Firebase environment-file approach avoids Secret Manager but is less protected than a managed secret. Keep both `.env.local` and `functions/.env.the-perfume-nerd` private and never commit or share them. Deploying Firebase Functions may require the project to use the Blaze billing plan.
+Use the Paystack **test secret key** while validating in test mode and the live secret only for production. In the Paystack dashboard, configure the webhook URL `https://the-perfume-nerd-api.onrender.com/api/paystack/webhook` and subscribe to successful charge events. The webhook signature is verified, and the API also verifies each returning transaction directly with Paystack. Only Firestore-backed prices, discounts, visibility and stock are trusted for payment calculations; browser-supplied prices are ignored. Pending orders are not deducted from stock. If stock is no longer sufficient after a successful charge, the order is marked for administrator review rather than silently overselling.
 
-Use the Paystack **test secret key** while validating in test mode and the live secret only for production. The store return URL defaults to the production storefront URL in `functions/index.js`; update that value if the storefront domain changes. In the Paystack dashboard, configure the webhook URL shown for the deployed `paystackWebhook` function (typically `https://us-central1-PROJECT_ID.cloudfunctions.net/paystackWebhook`) and subscribe to successful charge events. The webhook signature is verified, and the callable also verifies each returning transaction directly with Paystack. Only Firestore-backed prices, discounts, visibility and stock are trusted for payment calculations; browser-supplied prices are ignored. Pending orders are not deducted from stock. If stock is no longer sufficient after a successful charge, the order is marked for administrator review rather than silently overselling.
+For local Firebase Functions emulator tests, run `npm.cmd run paystack:configure` first. Use a Paystack test key for local checks.
 
-For emulator checkout tests, run `npm.cmd run paystack:configure` first; the Functions emulator reads the ignored Functions environment file and sends Paystack returns to `http://localhost:5173/orders`. Use a Paystack test key for local checks.
+The customer Orders page is available from the hamburger menu. Signed-in users can track their own orders; guest orders require the order ID and checkout email. Firestore rules allow customers to read only their own signed-in orders and prohibit all browser-side order writes. Admin order status changes and user directory reads go through the Render API, which verifies Firebase ID tokens and administrator authorization server-side.
 
-The customer Orders page is available from the hamburger menu. Signed-in users can track their own orders; guest orders require the order ID and checkout email. Firestore rules allow customers to read only their own signed-in orders and prohibit all browser-side order writes. Admin order status changes and user directory reads are performed through administrator-authorized Functions callables.
-
-Run the focused server price and checkout validation tests with `npm.cmd run test:online-orders`. Firestore order-access rules can be checked with `npm.cmd run test:rules`. A full payment round trip requires a configured Firebase Functions emulator/deployment and Paystack test credentials; do not perform a live charge as a routine test.
+Run the focused server price and checkout validation tests with `npm.cmd run test:online-orders`. The Render HTTP adapter can be tested with `npm.cmd run test:render-api`; Firestore order-access rules can be checked with `npm.cmd run test:rules`. A full payment round trip requires the Render service and Paystack test credentials; do not perform a live charge as a routine test.
 
 Firebase Authentication, the Firestore-backed editable storefront/admin workspace, and baseline Firestore/Storage rules are implemented. Deploy current rules and provision an administrator claim before live admin editing works. Full real-time support chat, staff permissions, audit logs and operational monitoring are not included.
 

@@ -12,6 +12,7 @@
     "paystack:configure": "node scripts/configure-paystack-env.mjs",
     "test:rules": "firebase emulators:exec --project demo-perfume-nerd --only firestore,storage \"node --test tests/firebase-rules.test.mjs\"",
     "test:online-orders": "node --test tests/online-orders.test.mjs",
+    "test:render-api": "node --test tests/render-api.test.mjs",
     "test:pos": "firebase emulators:exec --project demo-perfume-nerd --only auth,firestore,functions \"node --test tests/pos-functions.test.mjs\"",
     "test:catalog-categories": "node --test tests/catalog-categories.test.mjs"
   },

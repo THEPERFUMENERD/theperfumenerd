@@ -301,41 +301,44 @@ export const lookupGuestOrder = onCall(async (request) => {
   };
 });
 
+export async function processPaystackWebhook(rawBody, signature, event) {
+  const expected = createHmac('sha512', getPaystackSecretKey()).update(rawBody).digest();
+  let supplied;
+  try {
+    supplied = Buffer.from(signature, 'hex');
+  } catch {
+    return { statusCode: 401, body: 'Unauthorized' };
+  }
+  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+    return { statusCode: 401, body: 'Unauthorized' };
+  }
+  if (event?.event !== 'charge.success') {
+    return { statusCode: 200, body: 'Ignored' };
+  }
+  const payment = event.data;
+  if (typeof payment?.reference !== 'string') {
+    return { statusCode: 400, body: 'Invalid event' };
+  }
+  try {
+    await recordSuccessfulOnlinePayment(payment.reference, payment);
+    return { statusCode: 200, body: 'OK' };
+  } catch (error) {
+    console.error('Paystack success webhook could not be processed.', error);
+    return { statusCode: error instanceof HttpsError && error.code === 'not-found' ? 404 : 500, body: 'Webhook processing failed' };
+  }
+}
+
 export const paystackWebhook = onRequest(async (request, response) => {
   if (request.method !== 'POST') {
     response.status(405).send('Method not allowed');
     return;
   }
-  const signature = request.get('x-paystack-signature') ?? '';
-  const expected = createHmac('sha512', getPaystackSecretKey()).update(request.rawBody).digest();
-  let supplied;
-  try {
-    supplied = Buffer.from(signature, 'hex');
-  } catch {
-    response.status(401).send('Unauthorized');
-    return;
-  }
-  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
-    response.status(401).send('Unauthorized');
-    return;
-  }
-  const event = request.body;
-  if (event?.event !== 'charge.success') {
-    response.status(200).send('Ignored');
-    return;
-  }
-  const payment = event.data;
-  if (typeof payment?.reference !== 'string') {
-    response.status(400).send('Invalid event');
-    return;
-  }
-  try {
-    await recordSuccessfulOnlinePayment(payment.reference, payment);
-    response.status(200).send('OK');
-  } catch (error) {
-    console.error('Paystack success webhook could not be processed.', error);
-    response.status(error instanceof HttpsError && error.code === 'not-found' ? 404 : 500).send('Webhook processing failed');
-  }
+  const result = await processPaystackWebhook(
+    request.rawBody,
+    request.get('x-paystack-signature') ?? '',
+    request.body,
+  );
+  response.status(result.statusCode).send(result.body);
 });
 
 export const updateOnlineOrderStatus = onCall(async (request) => {

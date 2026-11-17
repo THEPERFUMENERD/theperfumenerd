@@ -6,8 +6,8 @@ import {
 import { ArrowLeft, ArrowRight, Check, ClipboardList, Image as ImageIcon, ImagePlus, LayoutDashboard, MessageSquare, Package, Percent, Plus, Save, Search, Settings, ShoppingCart, Trash2, Users, X } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import { signOut } from 'firebase/auth';
-import { httpsCallable } from 'firebase/functions';
-import { auth, db, functions, isFirebaseConfigured } from './firebase';
+import { auth, db, isFirebaseConfigured } from './firebase';
+import { orderApi } from './order-api';
 import { LoadedImage } from './LoadedImage';
 import { fragranceCategories, getFragranceCategories, money, products as sampleProducts, type Fragrance } from './catalog';
 import { cacheStorefrontSettings, defaultCollectionHeroSettings, defaultCollectionSettings, defaultFinderSettings, defaultHeroSettings, type StorefrontSettings } from './storefront-data';
@@ -110,22 +110,21 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
   }, [isAdmin]);
 
   useEffect(() => {
-    if (section !== 'users' || !isAdmin || !functions) return;
+    if (section !== 'users' || !isAdmin) return;
     let active = true;
     setUsersLoading(true);
     setError('');
-    const listUsers = httpsCallable<
-      { pageToken?: string },
-      { users: AdminUser[]; nextPageToken: string | null; totalUsers: number }
-    >(functions, 'listAdminUsers');
-    listUsers({}).then(({ data }) => {
+    orderApi<{ users: AdminUser[]; nextPageToken: string | null; totalUsers: number }>(
+      '/api/admin/users',
+      {},
+    ).then((data) => {
       if (!active) return;
       setAdminUsers(data.users);
       setTotalUsers(data.totalUsers);
       setNextUsersPage(data.nextPageToken);
     }).catch((reason: unknown) => {
       console.error('Could not load registered customer accounts.', reason);
-      if (active) setError('The registered user list could not be loaded. Confirm administrator access and deploy the latest Functions.');
+      if (active) setError('The registered user list could not be loaded. Confirm administrator access and the order API deployment.');
     }).finally(() => {
       if (active) setUsersLoading(false);
     });
@@ -399,15 +398,10 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
     }
   };
   const updateOrderStatus = async (orderId: string, status: string) => {
-    if (!functions) {
-      setError('Order management is unavailable because Firebase Functions is not configured.');
-      return;
-    }
     setBusy(true);
     clearAlerts();
     try {
-      const updateStatus = httpsCallable(functions, 'updateOnlineOrderStatus');
-      await updateStatus({ orderId, status });
+      await orderApi('/api/admin/orders/status', { orderId, status });
       setMessage(`Order ${orderId} updated.`);
     } catch (reason) {
       fail(reason, 'Order status could not be updated. Confirm the order is paid and try again.');
@@ -416,15 +410,15 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
     }
   };
   const loadMoreUsers = async () => {
-    if (!functions || !nextUsersPage) return;
+    if (!nextUsersPage) return;
     setUsersLoading(true);
     clearAlerts();
     try {
-      const listUsers = httpsCallable<
-        { pageToken?: string },
-        { users: AdminUser[]; nextPageToken: string | null; totalUsers: number }
-      >(functions, 'listAdminUsers');
-      const { data } = await listUsers({ pageToken: nextUsersPage });
+      const data = await orderApi<{
+        users: AdminUser[];
+        nextPageToken: string | null;
+        totalUsers: number;
+      }>('/api/admin/users', { pageToken: nextUsersPage });
       setAdminUsers((current) => [...current, ...data.users]);
       setTotalUsers(data.totalUsers);
       setNextUsersPage(data.nextPageToken);
@@ -466,7 +460,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
   if (loading || claimLoading) return <main className="admin-guard"><p>Checking secure administrator access…</p></main>;
   if (!user) return <main className="admin-guard"><section className="admin-access-card"><span className="eyebrow">THE PERFUME NERD · ADMIN</span><h1>Administrator sign-in.</h1><p>Sign in with your designated admin account, then return here. Admin access is verified using a server-issued Firebase claim.</p><button className="primary-button" onClick={onSignIn}>Go to account sign-in <ArrowLeft size={16} /></button></section></main>;
   if (!isAdmin) return <main className="admin-guard"><section className="admin-access-card"><span className="eyebrow">RESTRICTED AREA</span><h1>Admin access required.</h1><p>This account does not have the trusted administrator claim. Contact your project administrator to provision your account securely.</p>{claimError && <p className="auth-error" role="alert">{claimError}</p>}<button className="outline-button" onClick={onSignIn}>Return to account</button></section></main>;
-  if (!isFirebaseConfigured || !db || !functions) return <main className="admin-guard"><p>Firebase Firestore and Functions must be configured for the admin workspace.</p></main>;
+  if (!isFirebaseConfigured || !db) return <main className="admin-guard"><p>Firebase Firestore must be configured for the admin workspace.</p></main>;
 
   const sections: { id: AdminSection; label: string; icon: typeof Package }[] = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },

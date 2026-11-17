@@ -21,3 +21,11 @@ jobs:
             2*|3*) ;;
             *) exit 1 ;;
           esac
+      - name: Ping order API
+        run: |
+          status="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' --max-time 30 https://the-perfume-nerd-api.onrender.com/health)"
+          echo "Order API returned HTTP ${status}"
+          case "${status}" in
+            2*|3*) ;;
+            *) exit 1 ;;
+          esac

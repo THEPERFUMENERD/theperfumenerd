@@ -8,6 +8,7 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_MESSAGING_SENDER_ID: string | undefined;
   readonly VITE_FIREBASE_APP_ID: string | undefined;
   readonly VITE_USE_FIREBASE_EMULATORS: string | undefined;
+  readonly VITE_ORDER_API_URL: string | undefined;
   readonly VITE_CLOUDINARY_CLOUD_NAME: string | undefined;
   readonly VITE_CLOUDINARY_PRODUCT_UPLOAD_PRESET: string | undefined;
   readonly VITE_CLOUDINARY_STOREFRONT_UPLOAD_PRESET: string | undefined;

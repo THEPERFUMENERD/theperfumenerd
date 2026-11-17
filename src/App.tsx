@@ -4,9 +4,10 @@ import {
   Menu, Minus, Plus, Search, ShoppingBag, SlidersHorizontal, Sparkles, X,
 } from 'lucide-react';
 import { getFragranceCategories, money, optimizedProductImage, type Fragrance } from './catalog';
-import { auth, authPersistence, db, functions, isFirebaseConfigured } from './firebase';
+import { auth, authPersistence, db, isFirebaseConfigured } from './firebase';
 import { LoadedImage } from './LoadedImage';
 import { applyStorefrontDiscounts } from './discounts';
+import { orderApi } from './order-api';
 import {
   createUserWithEmailAndPassword,
   GoogleAuthProvider,
@@ -20,7 +21,6 @@ import {
   type User,
 } from 'firebase/auth';
 import { addDoc, collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 import { defaultCollectionHeroSettings, defaultCollectionSettings, defaultFinderSettings, defaultHeroSettings, useStorefrontData, type StorefrontSettings } from './storefront-data';
 const AdminPortal = lazy(() => import('./admin'));
 const PosTerminal = lazy(() => import('./pos').then((module) => ({ default: module.PosTerminal })));
@@ -327,28 +327,28 @@ function App() {
   const startCheckout = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setCheckoutError('');
-    if (!functions || cart.length === 0) {
+    if (!isFirebaseConfigured || cart.length === 0) {
       setCheckoutError('Secure checkout is unavailable. Check your connection and try again.');
       return;
     }
     setCheckoutBusy(true);
     try {
-      const startPaystackCheckout = httpsCallable<
-        { customer: typeof checkoutForm; items: { productId: string; quantity: number }[] },
-        { authorizationUrl: string; orderId: string; amountMinor: number }
-      >(functions, 'initializePaystackOrder');
-      const result = await startPaystackCheckout({
+      const result = await orderApi<{
+        authorizationUrl: string;
+        orderId: string;
+        amountMinor: number;
+      }>('/api/orders/initialize', {
         customer: checkoutForm,
         items: cart.map(({ id, quantity }) => ({ productId: id, quantity })),
       });
-      if (!result.data.authorizationUrl || !result.data.orderId) {
+      if (!result.authorizationUrl || !result.orderId) {
         throw new Error('The payment service did not return a checkout link.');
       }
       sessionStorage.setItem('tpn-pending-checkout', JSON.stringify({
-        orderId: result.data.orderId,
+        orderId: result.orderId,
         email: checkoutForm.email.trim().toLowerCase(),
       }));
-      window.location.assign(result.data.authorizationUrl);
+      window.location.assign(result.authorizationUrl);
     } catch (error) {
       console.error('Could not initialize secure Paystack checkout.', error);
       setCheckoutError(error instanceof Error ? error.message : 'Unable to start secure checkout.');
@@ -557,22 +557,18 @@ function OrderTrackingPage({ user, authLoading, onPaymentConfirmed }: {
     setOrderId(reference);
     if (checkout.orderId === reference && checkout.email) setEmail(checkout.email);
     const verify = async () => {
-      if (!functions) {
-        setPaymentError('Payment confirmation is unavailable. Use the order ID and checkout email below to check your order.');
-        return;
-      }
       try {
-        const verifyPayment = httpsCallable<
-          { reference: string; email?: string },
-          { orderId: string; paymentStatus: string; status: string }
-        >(functions, 'verifyPaystackOrder');
-        const result = await verifyPayment({ reference, email: checkout.email ?? '' });
-        if (result.data.paymentStatus === 'paid') {
-          setPaymentNotice(`Payment received. Your order ${result.data.orderId} is confirmed.`);
+        const result = await orderApi<{
+          orderId: string;
+          paymentStatus: string;
+          status: string;
+        }>('/api/orders/verify', { reference, email: checkout.email ?? '' });
+        if (result.paymentStatus === 'paid') {
+          setPaymentNotice(`Payment received. Your order ${result.orderId} is confirmed.`);
           onPaymentConfirmed();
           setGuestOrder(null);
         } else {
-          setPaymentNotice(`Payment for order ${result.data.orderId} is still being confirmed. You can check again below.`);
+          setPaymentNotice(`Payment for order ${result.orderId} is still being confirmed. You can check again below.`);
         }
       } catch (reason) {
         console.error('Could not verify the returned Paystack payment.', reason);
@@ -589,30 +585,31 @@ function OrderTrackingPage({ user, authLoading, onPaymentConfirmed }: {
 
   const lookup = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!functions) {
-      setLookupError('Order lookup is unavailable until Firebase is configured.');
-      return;
-    }
     setLookupBusy(true);
     setLookupError('');
     setGuestOrder(null);
     try {
-      const findOrder = httpsCallable<
-        { orderId: string; email: string },
-        CustomerOrder
-      >(functions, 'lookupGuestOrder');
-      const result = await findOrder({ orderId: orderId.trim().toUpperCase(), email: email.trim().toLowerCase() });
-      setGuestOrder(result.data);
-      if (result.data.paymentStatus === 'pending') {
-        const verifyPayment = httpsCallable<
-          { reference: string; email?: string },
-          { orderId: string; paymentStatus: string; status: string }
-        >(functions, 'verifyPaystackOrder');
-        const verification = await verifyPayment({ reference: result.data.orderId, email: email.trim().toLowerCase() });
-        const refreshed = await findOrder({ orderId: result.data.orderId, email: email.trim().toLowerCase() });
-        setGuestOrder(refreshed.data);
-        if (verification.data.paymentStatus === 'paid') {
-          setPaymentNotice(`Payment received. Your order ${result.data.orderId} is confirmed.`);
+      const guestOrder = await orderApi<CustomerOrder>('/api/orders/guest-lookup', {
+        orderId: orderId.trim().toUpperCase(),
+        email: email.trim().toLowerCase(),
+      });
+      setGuestOrder(guestOrder);
+      if (guestOrder.paymentStatus === 'pending') {
+        const verification = await orderApi<{
+          orderId: string;
+          paymentStatus: string;
+          status: string;
+        }>('/api/orders/verify', {
+          reference: guestOrder.orderId,
+          email: email.trim().toLowerCase(),
+        });
+        const refreshed = await orderApi<CustomerOrder>('/api/orders/guest-lookup', {
+          orderId: guestOrder.orderId,
+          email: email.trim().toLowerCase(),
+        });
+        setGuestOrder(refreshed);
+        if (verification.paymentStatus === 'paid') {
+          setPaymentNotice(`Payment received. Your order ${guestOrder.orderId} is confirmed.`);
           onPaymentConfirmed();
         }
       }

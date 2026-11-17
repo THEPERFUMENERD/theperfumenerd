@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: the-perfume-nerd-api
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install --prefix functions
+    startCommand: node functions/render-server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: FIREBASE_PROJECT_ID
+        value: the-perfume-nerd
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PUBLIC_STORE_URL
+        value: https://theperfumenerd.onrender.com
+      - key: ALLOWED_ORIGINS
+        value: https://theperfumenerd.onrender.com,https://the-perfume-nerd.web.app,https://the-perfume-nerd.firebaseapp.com,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174
