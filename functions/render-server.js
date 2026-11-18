@@ -39,6 +39,7 @@ const {
   updateOnlineOrderStatus,
   listAdminUsers,
   processPaystackWebhook,
+  processPendingPaymentSmsReminders,
 } = await import('./index.js');
 
 const defaultOrigins = [
@@ -236,5 +237,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const port = Number(process.env.PORT) || 3001;
   createRenderServer().listen(port, '0.0.0.0', () => {
     console.log(`The Perfume Nerd order API listening on port ${port}.`);
+    const processReminders = async () => {
+      try {
+        const result = await processPendingPaymentSmsReminders();
+        if (result.sent || result.failed) {
+          console.info('Pending-payment SMS reminder sweep completed.', result);
+        }
+      } catch (error) {
+        console.error('Pending-payment SMS reminder sweep failed.', error);
+      }
+    };
+    void processReminders();
+    const reminderInterval = setInterval(() => { void processReminders(); }, 60_000);
+    reminderInterval.unref();
   });
 }

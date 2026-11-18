@@ -661,6 +661,7 @@ function OrderTrackingPage({ user, authLoading, onPaymentConfirmed }: {
         const result = await orderApi<{
           orderId: string;
           paymentStatus: string;
+          paymentAttemptStatus?: string;
           status: string;
           smsStatus?: string;
         }>('/api/orders/verify', { reference, email: checkout.email ?? '' });
@@ -673,6 +674,9 @@ function OrderTrackingPage({ user, authLoading, onPaymentConfirmed }: {
           setPaymentNotice(`Payment received. Your order ${result.orderId} is confirmed.${smsNotice}`);
           onPaymentConfirmed();
           setGuestOrder(null);
+        } else if (result.paymentAttemptStatus === 'not_completed') {
+          setPaymentNotice('');
+          setPaymentError(`Payment was not completed. Your order ${result.orderId} is still pending and your cart is saved. You can try again from your cart.`);
         } else {
           setPaymentNotice(`Payment for order ${result.orderId} is still being confirmed. You can check again below.`);
         }

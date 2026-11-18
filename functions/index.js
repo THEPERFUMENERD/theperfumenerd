@@ -1,13 +1,16 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
-import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';
 import { normalizeSmsRecipient, selectOrderSmsPhone, sendMnotifySms } from './mnotify.js';
 
 if (getApps().length === 0) initializeApp();
 const db = getFirestore();
 const ADMIN_EMAIL = 'perfumenerd6@gmail.com';
+const paymentReminderInitialDelayMs = 2 * 60 * 60 * 1000;
+const paymentReminderFollowupDelayMs = 10 * 60 * 60 * 1000;
+const paymentReminderRetryDelayMs = 60 * 60 * 1000;
 const getPaystackSecretKey = () => {
   const key = process.env.PAYSTACK_SECRET_KEY;
   if (typeof key !== 'string' || !key.trim()) {
@@ -24,6 +27,9 @@ const normalizedEmail = (value) => typeof value === 'string' ? value.trim().toLo
 export const isValidOnlineOrderId = (value) => typeof value === 'string'
   && (/^TPN-[A-F0-9]{7}$/i.test(value) || /^TPN-\d{8}-[A-F0-9]{32}$/i.test(value));
 export const generateOnlineOrderId = () => `TPN-${randomBytes(4).toString('hex').slice(0, 7).toUpperCase()}`;
+export const getPaymentAttemptStatus = (status) => status === 'failed' || status === 'abandoned'
+  ? 'not_completed'
+  : 'pending';
 
 export function calculateOnlineOrderItems(inputItems, productDocuments, settings = {}) {
   const selectedPrices = new Map(
@@ -191,6 +197,36 @@ async function getOrderSmsPhone(userId, checkoutPhone) {
   }
 }
 
+async function getAdministratorSmsPhone() {
+  const account = await getAdminAuth().getUserByEmail(ADMIN_EMAIL);
+  if (account.emailVerified !== true || account.email?.toLowerCase() !== ADMIN_EMAIL) {
+    throw new Error('The administrator account is not verified.');
+  }
+  const profile = await db.collection('users').doc(account.uid).get();
+  const phone = profile.data()?.phoneNumber;
+  if (typeof phone !== 'string' || !phone.trim()) {
+    throw new Error('The administrator account does not have a saved phone number.');
+  }
+  return phone.trim();
+}
+
+async function sendAdminOrderSms(orderRef, order) {
+  let phone;
+  try {
+    phone = await getAdministratorSmsPhone();
+  } catch (error) {
+    console.error('Administrator paid-order SMS could not be addressed.', error);
+    return 'failed';
+  }
+  const message = [
+    `THE PERFUME NERD: Paid order ${order.orderId} received.`,
+    `Customer: ${order.customer.name}`,
+    `Phone: ${order.customer.phone}`,
+    `Delivery address: ${order.customer.address}`,
+  ].join('\n');
+  return sendOrderSms(orderRef, 'admin_order_received', phone, message);
+}
+
 async function recordSuccessfulOnlinePayment(reference, payment) {
   const orderRef = db.collection('orders').doc(reference);
   const result = await db.runTransaction(async (transaction) => {
@@ -209,6 +245,8 @@ async function recordSuccessfulOnlinePayment(reference, payment) {
         userId: order.userId,
         totalMinor: order.totalMinor,
         shouldNotify: order.smsNotifications?.order_received?.status !== 'sent',
+        customer: order.customer,
+        shouldNotifyAdmin: order.smsNotifications?.admin_order_received?.status !== 'sent',
       };
     }
     if (order.paymentStatus !== 'pending') {
@@ -251,6 +289,7 @@ async function recordSuccessfulOnlinePayment(reference, payment) {
       paystackTransactionId: String(payment.id ?? ''),
       paidAt: now,
       updatedAt: now,
+      reminderNextAt: FieldValue.delete(),
     });
     return {
       orderId: order.orderId,
@@ -259,15 +298,115 @@ async function recordSuccessfulOnlinePayment(reference, payment) {
       userId: order.userId,
       totalMinor: order.totalMinor,
       shouldNotify: true,
+      customer: order.customer,
+      shouldNotifyAdmin: order.smsNotifications?.admin_order_received?.status !== 'sent',
     };
   });
-  if (!result.shouldNotify) return { orderId: result.orderId, status: result.status, smsStatus: 'already_sent' };
-  const message = result.status === 'processing'
-    ? `THE PERFUME NERD: We received and confirmed your order ${result.orderId} for GH₵${(result.totalMinor / 100).toFixed(2)}. We are preparing it for dispatch.`
-    : `THE PERFUME NERD: We received your order ${result.orderId} and confirmed payment. Our team is checking availability and will update you shortly.`;
-  const phone = await getOrderSmsPhone(result.userId, result.phone);
-  const smsStatus = await sendOrderSms(orderRef, 'order_received', phone, message);
-  return { orderId: result.orderId, status: result.status, smsStatus };
+  const [smsStatus, adminSmsStatus] = await Promise.all([
+    result.shouldNotify
+      ? (async () => {
+        const message = result.status === 'processing'
+          ? `THE PERFUME NERD: We received and confirmed your order ${result.orderId} for GH₵${(result.totalMinor / 100).toFixed(2)}. We are preparing it for dispatch.`
+          : `THE PERFUME NERD: We received your order ${result.orderId} and confirmed payment. Our team is checking availability and will update you shortly.`;
+        const phone = await getOrderSmsPhone(result.userId, result.phone);
+        return sendOrderSms(orderRef, 'order_received', phone, message);
+      })()
+      : 'already_sent',
+    result.shouldNotifyAdmin ? sendAdminOrderSms(orderRef, result) : 'already_sent',
+  ]);
+  return { orderId: result.orderId, status: result.status, smsStatus, adminSmsStatus };
+}
+
+async function sendPaymentReminder(orderRef, scheduledAt) {
+  let reminderKey = '';
+  let phone = '';
+  let message = '';
+  try {
+    const claim = await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(orderRef);
+      if (!snapshot.exists) return { status: 'missing' };
+      const order = snapshot.data();
+      if (order.paymentStatus !== 'pending') {
+        transaction.update(orderRef, { reminderNextAt: FieldValue.delete() });
+        return { status: 'not_pending' };
+      }
+      const nextAt = order.reminderNextAt?.toMillis?.();
+      if (!Number.isFinite(nextAt) || nextAt > scheduledAt) return { status: 'not_due' };
+
+      const notifications = order.smsNotifications ?? {};
+      reminderKey = notifications.payment_reminder_2h?.status === 'sent'
+        ? 'payment_reminder_10h'
+        : 'payment_reminder_2h';
+      if (notifications[reminderKey]?.status === 'sent') {
+        transaction.update(orderRef, { reminderNextAt: FieldValue.delete() });
+        return { status: 'already_sent' };
+      }
+      if (isActiveSmsClaim(notifications[reminderKey])) return { status: 'in_progress' };
+
+      phone = order.customer?.phone ?? '';
+      const reminderLabel = reminderKey === 'payment_reminder_2h' ? 'Payment reminder' : 'Final payment reminder';
+      message = `THE PERFUME NERD: ${reminderLabel} for order ${order.orderId}. Your order is awaiting payment. Please complete payment so we can process it.`;
+      transaction.update(orderRef, {
+        [`smsNotifications.${reminderKey}`]: {
+          status: 'sending',
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        reminderNextAt: Timestamp.fromMillis(scheduledAt + 10 * 60 * 1000),
+      });
+      return { status: 'claimed' };
+    });
+    if (claim.status !== 'claimed') return claim.status;
+
+    await sendMnotifySms({ phone, message });
+    const update = {
+      [`smsNotifications.${reminderKey}`]: {
+        status: 'sent',
+        sentAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      reminderNextAt: reminderKey === 'payment_reminder_2h'
+        ? Timestamp.fromMillis(Date.now() + paymentReminderFollowupDelayMs)
+        : FieldValue.delete(),
+    };
+    await orderRef.update(update);
+    return 'sent';
+  } catch (error) {
+    console.error(
+      'Pending-payment SMS reminder failed.',
+      error instanceof Error ? error.message : 'Unknown SMS error.',
+    );
+    if (reminderKey) {
+      try {
+        await orderRef.update({
+          [`smsNotifications.${reminderKey}`]: {
+            status: 'failed',
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          reminderNextAt: Timestamp.fromMillis(Date.now() + paymentReminderRetryDelayMs),
+        });
+      } catch (recordError) {
+        console.error('Could not record the failed payment reminder.', recordError);
+      }
+    }
+    return 'failed';
+  }
+}
+
+export async function processPendingPaymentSmsReminders() {
+  const now = Date.now();
+  const dueOrders = await db.collection('orders')
+    .where('reminderNextAt', '<=', Timestamp.fromMillis(now))
+    .orderBy('reminderNextAt')
+    .limit(10)
+    .get();
+  const results = await Promise.all(
+    dueOrders.docs.map((snapshot) => sendPaymentReminder(snapshot.ref, now)),
+  );
+  return {
+    checked: dueOrders.size,
+    sent: results.filter((status) => status === 'sent').length,
+    failed: results.filter((status) => status === 'failed').length,
+  };
 }
 
 export const initializePaystackOrder = onCall(async (request) => {
@@ -318,6 +457,7 @@ export const initializePaystackOrder = onCall(async (request) => {
       inventoryStatus: 'not_deducted',
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
+      reminderNextAt: Timestamp.fromMillis(Date.now() + paymentReminderInitialDelayMs),
     };
     transaction.create(orderRef, order);
   });
@@ -377,7 +517,12 @@ export const verifyPaystackOrder = onCall(async (request) => {
     throw new HttpsError('failed-precondition', 'The verified payment reference does not match this order.');
   }
   if (payment.status !== 'success') {
-    return { orderId: reference, paymentStatus: 'pending', status: 'awaiting_payment' };
+    return {
+      orderId: reference,
+      paymentStatus: 'pending',
+      paymentAttemptStatus: getPaymentAttemptStatus(payment.status),
+      status: 'awaiting_payment',
+    };
   }
   const result = await recordSuccessfulOnlinePayment(reference, payment);
   return { ...result, paymentStatus: 'paid' };

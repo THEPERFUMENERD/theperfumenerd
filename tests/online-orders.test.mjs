@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculateOnlineOrderItems, generateOnlineOrderId, isValidOnlineOrderId, validateOnlineOrder } from '../functions/index.js';
+import {
+  calculateOnlineOrderItems,
+  generateOnlineOrderId,
+  getPaymentAttemptStatus,
+  isValidOnlineOrderId,
+  validateOnlineOrder,
+} from '../functions/index.js';
 
 const productSnapshot = (data) => ({ exists: true, data: () => data });
 const customer = {
@@ -37,6 +43,12 @@ test('new short order IDs and legacy order IDs remain valid', () => {
   assert.equal(isValidOnlineOrderId('TPN-08F74DE'), true);
   assert.equal(isValidOnlineOrderId('TPN-20261117-0DB015E7842DF2269C4730051C3E9546'), true);
   assert.equal(isValidOnlineOrderId('TPN-TOO-LONG'), false);
+});
+
+test('failed and abandoned payment attempts remain retryable without becoming paid', () => {
+  assert.equal(getPaymentAttemptStatus('failed'), 'not_completed');
+  assert.equal(getPaymentAttemptStatus('abandoned'), 'not_completed');
+  assert.equal(getPaymentAttemptStatus('ongoing'), 'pending');
 });
 
 test('checkout rejects repeated lines, invalid quantities and incomplete delivery details', () => {

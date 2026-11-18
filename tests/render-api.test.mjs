@@ -100,7 +100,7 @@ test('welcome SMS endpoint requires the account owner to be signed in', async ()
   assert.equal((await response.json()).message, 'Sign in to continue.');
 });
 
-test('Paystack webhook rejects bad signatures and ignores signed unrelated events', async () => {
+test('Paystack webhook rejects bad signatures and ignores unsuccessful payment events', async () => {
   const rawBody = Buffer.from(JSON.stringify({ event: 'transfer.success', data: {} }));
   const rejected = await fetch(`${baseUrl}/api/paystack/webhook`, {
     method: 'POST',
@@ -117,4 +117,17 @@ test('Paystack webhook rejects bad signatures and ignores signed unrelated event
   });
   assert.equal(accepted.status, 200);
   assert.equal(await accepted.text(), 'Ignored');
+
+  const failedPayment = Buffer.from(JSON.stringify({
+    event: 'charge.failed',
+    data: { reference: 'TPN-20261117-ORDER', status: 'failed' },
+  }));
+  const failedSignature = createHmac('sha512', paystackSecret).update(failedPayment).digest('hex');
+  const failed = await fetch(`${baseUrl}/api/paystack/webhook`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-paystack-signature': failedSignature },
+    body: failedPayment,
+  });
+  assert.equal(failed.status, 200);
+  assert.equal(await failed.text(), 'Ignored');
 });
