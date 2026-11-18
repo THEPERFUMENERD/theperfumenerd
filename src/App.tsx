@@ -31,6 +31,7 @@ const PosCustomerDisplay = lazy(() => import('./pos').then((module) => ({ defaul
 type Tab = 'Home' | 'Search' | 'Wishlist' | 'Account' | 'Cart' | 'Orders' | 'About' | 'Contact' | 'Support';
 type AdminView = 'dashboard' | 'pos' | 'customer-display' | null;
 type CartLine = { id: string; quantity: number };
+type CheckoutFulfillment = 'delivery' | 'pickup' | null;
 type Panel = 'menu' | 'detail' | 'filters' | 'finder' | 'checkout' | 'feedback' | null;
 type FinderAnswers = { category: string; family: string; occasion: string; budget: string; strength: string };
 type ContactFormValues = { name: string; email: string; phone: string; subject: string; message: string };
@@ -101,6 +102,7 @@ function App() {
   const [finderStep, setFinderStep] = useState(0);
   const [answers, setAnswers] = useState<FinderAnswers>({ category: '', family: '', occasion: '', budget: '', strength: '' });
   const [checkoutForm, setCheckoutForm] = useState({ name: '', email: '', phone: '', address: '', city: '', region: '', postalCode: '' });
+  const [checkoutFulfillment, setCheckoutFulfillment] = useState<CheckoutFulfillment>(null);
 
   const storefrontProducts = useMemo(
     () => applyStorefrontDiscounts(products, settings, settingsLoading),
@@ -371,6 +373,10 @@ function App() {
   const startCheckout = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setCheckoutError('');
+    if (!checkoutFulfillment) {
+      setCheckoutError('Choose delivery or pickup to continue.');
+      return;
+    }
     if (!isFirebaseConfigured || cart.length === 0) {
       setCheckoutError('Secure checkout is unavailable. Check your connection and try again.');
       return;
@@ -382,7 +388,13 @@ function App() {
         orderId: string;
         amountMinor: number;
       }>('/api/orders/initialize', {
-        customer: checkoutForm,
+        customer: checkoutFulfillment === 'pickup' ? {
+          ...checkoutForm,
+          address: 'Pickup at showroom: Spintex, Accra. Adjacent to Pizzaman Chickenman. 0554757454',
+          city: 'Accra',
+          region: 'Greater Accra',
+          postalCode: '',
+        } : checkoutForm,
         items: cart.map(({ id, quantity }) => ({ productId: id, quantity })),
       });
       if (!result.authorizationUrl || !result.orderId) {
@@ -401,6 +413,7 @@ function App() {
   };
   const openCheckout = async () => {
     setCheckoutError('');
+    setCheckoutFulfillment(null);
     setPanel('checkout');
     const currentUser = auth?.currentUser;
     if (!currentUser || !db) return;
@@ -546,14 +559,30 @@ function App() {
             {recommendations.length ? <div className="product-grid">{recommendations.map((product, index) => card(product, index < 4))}</div> : <EmptyState title="A rare combination." text="Try changing a preference to see more of the collection." action="Edit preferences" onAction={() => setFinderStep(0)} />}</div>}
         </aside>}
         {panel === 'checkout' && <aside className="drawer right-drawer checkout-drawer" role="dialog" aria-modal="true" aria-label="Checkout">
-          <div className="drawer-top"><div><div className="eyebrow">SECURE CHECKOUT</div><h2>Your delivery details</h2></div><button className="icon-button" onClick={() => setPanel(null)} aria-label="Close checkout"><X size={20} /></button></div>
+          <div className="drawer-top"><div><div className="eyebrow">SECURE CHECKOUT</div><h2>{checkoutFulfillment === 'delivery' ? 'Delivery details' : checkoutFulfillment === 'pickup' ? 'Pickup details' : 'Choose delivery or pickup'}</h2></div><button className="icon-button" onClick={() => setPanel(null)} aria-label="Close checkout"><X size={20} /></button></div>
           <p className="checkout-note">Guest checkout is welcome. Your bag total is <strong>{money(cartTotal)}</strong>.</p>
           <form onSubmit={startCheckout} className="checkout-form">
-            {([['name', 'Full name'], ['email', 'Email address'], ['phone', 'Phone number'], ['address', 'Delivery address'], ['city', 'City'], ['region', 'Region'], ['postalCode', 'Postal or GhanaPost GPS code']] as const).map(([field, label]) =>
-              <label className="form-label" key={field}>{label}<input required={field !== 'postalCode'} type={field === 'email' ? 'email' : field === 'phone' ? 'tel' : 'text'} autoComplete={field === 'name' ? 'name' : field === 'email' ? 'email' : field === 'phone' ? 'tel' : field === 'address' ? 'street-address' : field === 'city' ? 'address-level2' : field === 'region' ? 'address-level1' : 'postal-code'} value={checkoutForm[field]} onChange={(e) => setCheckoutForm((current) => ({ ...current, [field]: e.target.value }))} /></label>)}
-            {checkoutError && <p className="checkout-error" role="alert">{checkoutError}</p>}
-            <p className="checkout-note">Pay securely with Paystack. Your current sale prices, product availability and Ghana cedi total are verified before payment. Delivery charges are not included in the online total.</p>
-            <button className="primary-button full-button" type="submit" disabled={checkoutBusy}>{checkoutBusy ? 'Preparing secure payment…' : 'Continue to payment'} <ArrowRight size={16} /></button>
+            <fieldset className="checkout-fulfillment">
+              <legend>How would you like to receive your order?</legend>
+              <label className={`checkout-fulfillment-option ${checkoutFulfillment === 'delivery' ? 'selected' : ''}`}>
+                <input type="radio" name="checkout-fulfillment" value="delivery" required checked={checkoutFulfillment === 'delivery'} onChange={() => { setCheckoutFulfillment('delivery'); setCheckoutError(''); }} />
+                <span><strong>Delivery</strong><small>Enter your delivery address</small></span>
+              </label>
+              <label className={`checkout-fulfillment-option ${checkoutFulfillment === 'pickup' ? 'selected' : ''}`}>
+                <input type="radio" name="checkout-fulfillment" value="pickup" required checked={checkoutFulfillment === 'pickup'} onChange={() => { setCheckoutFulfillment('pickup'); setCheckoutError(''); }} />
+                <span><strong>Pickup</strong><small>Collect from our showroom</small></span>
+              </label>
+            </fieldset>
+            {checkoutFulfillment && <>
+              {([['name', 'Full name'], ['email', 'Email address'], ['phone', 'Phone number']] as const).map(([field, label]) =>
+                <label className="form-label" key={field}>{label}<input required type={field === 'email' ? 'email' : field === 'phone' ? 'tel' : 'text'} autoComplete={field === 'name' ? 'name' : field === 'email' ? 'email' : 'tel'} value={checkoutForm[field]} onChange={(e) => setCheckoutForm((current) => ({ ...current, [field]: e.target.value }))} /></label>)}
+              {checkoutFulfillment === 'delivery' && ([['address', 'Delivery address'], ['city', 'City'], ['region', 'Region'], ['postalCode', 'Postal or GhanaPost GPS code']] as const).map(([field, label]) =>
+                <label className="form-label" key={field}>{label}<input required={field !== 'postalCode'} autoComplete={field === 'address' ? 'street-address' : field === 'city' ? 'address-level2' : field === 'region' ? 'address-level1' : 'postal-code'} value={checkoutForm[field]} onChange={(e) => setCheckoutForm((current) => ({ ...current, [field]: e.target.value }))} /></label>)}
+              {checkoutFulfillment === 'pickup' && <div className="checkout-pickup-location"><span className="eyebrow">PICK UP YOUR ORDER</span><strong>Spintex, Accra</strong><span>Adjacent to Pizzaman Chickenman.</span><a href="tel:+233554757454">0554757454</a></div>}
+              {checkoutError && <p className="checkout-error" role="alert">{checkoutError}</p>}
+              <p className="checkout-note">Pay securely with Paystack. Your current sale prices, product availability and Ghana cedi total are verified before payment.{checkoutFulfillment === 'delivery' ? ' Delivery charges are not included in the online total.' : ''}</p>
+              <button className="primary-button full-button" type="submit" disabled={checkoutBusy}>{checkoutBusy ? 'Preparing secure payment…' : 'Continue to payment'} <ArrowRight size={16} /></button>
+            </>}
           </form>
         </aside>}
       </div>}
