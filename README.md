@@ -15,6 +15,8 @@ Create a production bundle with `npm.cmd run build`.
 
 The GitHub Actions workflow at `.github/workflows/keep-render-awake.yml` requests both the Render storefront and order API every 5 minutes. It runs only after the workflow is pushed to the repository's default branch and GitHub Actions/scheduled workflows are enabled. Scheduled workflows are best-effort and GitHub may delay runs, so these free pings can reduce idle sleeps but cannot guarantee uninterrupted availability.
 
+The Render Blueprint configures the storefront as a static site and rewrites unknown file paths to `/index.html`, so refreshing client-side routes such as `/search`, `/wishlist`, `/account`, and `/cart` loads the app instead of returning a server 404. Keep this rewrite in place when changing the storefront's hosting configuration.
+
 ## Firebase email and Google sign-in
 
 The Account page supports Firebase email/password registration and sign-in, Google popup sign-in, email verification, password reset and sign-out. Authentication state uses Firebase's browser-local persistence.

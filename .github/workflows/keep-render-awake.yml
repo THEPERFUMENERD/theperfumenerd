@@ -13,14 +13,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Ping storefront
+      - name: Check storefront routes
         run: |
-          status="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' --max-time 30 https://theperfumenerd.onrender.com/)"
-          echo "Storefront returned HTTP ${status}"
-          case "${status}" in
-            2*|3*) ;;
-            *) exit 1 ;;
-          esac
+          for path in / /search /wishlist /account /cart; do
+            status="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' --max-time 30 "https://theperfumenerd.onrender.com${path}")"
+            echo "Storefront ${path} returned HTTP ${status}"
+            case "${status}" in
+              2*|3*) ;;
+              *) exit 1 ;;
+            esac
+          done
       - name: Ping order API
         run: |
           status="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' --max-time 30 https://the-perfume-nerd-api.onrender.com/health)"
