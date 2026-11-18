@@ -71,6 +71,10 @@ test('reports mNotify HTTP and provider failures', async () => {
     phone: '0241234567',
     message: 'Welcome.',
     apiKey: 'server-test-key',
-    fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ status: 'failure' }) }),
-  }), /HTTP 200/);
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: 'failure', code: '4001', message: 'Sender ID not approved' }),
+    }),
+  }), /HTTP 200\): 4001: Sender ID not approved/);
 });

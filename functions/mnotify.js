@@ -54,7 +54,14 @@ export async function sendMnotifySms({
   }
   const result = await response.json().catch(() => null);
   if (!response.ok || result?.status !== 'success') {
-    throw new Error(`mNotify rejected the SMS request (HTTP ${response.status}).`);
+    const details = [result?.code, result?.message]
+      .filter((value) => typeof value === 'string' || typeof value === 'number')
+      .map((value) => String(value).replace(/[\r\n\t]/g, ' ').trim().slice(0, 200))
+      .filter(Boolean)
+      .join(': ');
+    throw new Error(
+      `mNotify rejected the SMS request (HTTP ${response.status})${details ? `: ${details}` : ''}.`,
+    );
   }
   return result;
 }
