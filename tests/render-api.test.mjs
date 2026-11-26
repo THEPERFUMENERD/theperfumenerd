@@ -6,6 +6,7 @@ import { after, before, test } from 'node:test';
 let server;
 let baseUrl;
 const allowedOrigin = 'http://localhost:5173';
+const customStorefrontOrigins = ['https://www.theperfumenerd.com', 'https://theperfumenerd.com'];
 const paystackSecret = 'sk_test_render_api_unit_test';
 
 before(async () => {
@@ -20,7 +21,7 @@ before(async () => {
     private_key: privateKey,
   });
   process.env.PAYSTACK_SECRET_KEY = paystackSecret;
-  process.env.ALLOWED_ORIGINS = allowedOrigin;
+  process.env.ALLOWED_ORIGINS = [allowedOrigin, ...customStorefrontOrigins].join(',');
   const { createRenderServer } = await import('../functions/render-server.js');
   server = createRenderServer();
   server.listen(0, '127.0.0.1');
@@ -54,6 +55,21 @@ test('order API preflight allows the configured storefront origin and bearer aut
   assert.equal(response.headers.get('access-control-allow-origin'), allowedOrigin);
   assert.equal(response.headers.get('access-control-allow-methods'), 'POST, OPTIONS');
   assert.equal(response.headers.get('access-control-allow-headers'), 'Authorization, Content-Type');
+});
+
+test('order API preflight allows both custom storefront domains', async () => {
+  for (const origin of customStorefrontOrigins) {
+    const response = await fetch(`${baseUrl}/api/orders/initialize`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: origin,
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'authorization,content-type',
+      },
+    });
+    assert.equal(response.status, 204);
+    assert.equal(response.headers.get('access-control-allow-origin'), origin);
+  }
 });
 
 test('order API rejects unapproved storefront origins', async () => {
