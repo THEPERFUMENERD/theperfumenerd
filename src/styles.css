@@ -158,6 +158,22 @@ img { display: block; max-width: 100%; }
 .info-section { margin: 46px 0 0; padding-top: 30px; border-top: 1px solid var(--line); }
 .info-section h2, .contact-form-section h2 { margin: 8px 0 16px; font-family: var(--serif); font-size: clamp(27px, 4vw, 38px); font-weight: 500; letter-spacing: -.025em; }
 .info-section > p { margin: 10px 0; }
+.policy-page { max-width: 920px; }
+.policy-section { margin: 30px 0 0; padding-top: 24px; border-top: 1px solid var(--line); }
+.policy-section h2 { margin: 0 0 10px; font-family: var(--serif); font-size: clamp(22px, 3vw, 29px); font-weight: 500; }
+.policy-section p, .faq-item p, .policy-contact { color: #77736e; font-size: 12px; line-height: 1.85; }
+.policy-section p { margin: 0; }
+.policy-section a, .policy-contact a { color: var(--accent); text-underline-offset: 3px; }
+.faq-list { max-width: 790px; margin: 0 auto; border-top: 1px solid var(--line); }
+.faq-item { padding: 20px 2px; border-bottom: 1px solid var(--line); }
+.faq-item summary { color: var(--ink); font-family: var(--serif); font-size: 19px; cursor: pointer; }
+.faq-item p { margin: 12px 0 0; }
+.policy-contact { margin: 30px 0 0; text-align: center; }
+.feedback-page .contact-form-section { margin-top: 0; }
+.feedback-page .feedback-form .form-label { margin: 9px 0; }
+.feedback-page .feedback-form .form-label input { width: 100%; min-height: 45px; padding: 0 12px; border: 1px solid #ded9d1; border-radius: 7px; background: #fff; color: var(--ink); font-size: 11px; }
+.feedback-page .feedback-form textarea { width: 100%; min-height: 125px; resize: vertical; padding: 11px 12px; border: 1px solid #ded9d1; border-radius: 7px; background: #fff; color: var(--ink); font: 400 12px/1.6 var(--sans); }
+.feedback-page .feedback-form .auth-error { margin: 10px 0; }
 .principle-grid, .journey-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 24px; }
 .principle-grid > div, .journey-grid > div { min-width: 0; padding: 21px; border: 1px solid rgba(226,220,211,.85); border-radius: 14px; background: rgba(255,255,255,.62); }
 .principle-grid h3, .journey-grid h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }

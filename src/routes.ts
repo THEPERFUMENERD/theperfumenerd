@@ -1,7 +1,7 @@
-export type StorefrontTab = 'Home' | 'Search' | 'Wishlist' | 'Account' | 'Cart' | 'Orders' | 'About' | 'Contact' | 'Support';
+export type StorefrontTab = 'Home' | 'Search' | 'Wishlist' | 'Account' | 'Cart' | 'Orders' | 'About' | 'Contact' | 'Support' | 'FAQ' | 'Feedback' | 'Terms' | 'Privacy' | 'Delivery';
 
 const tabNames: StorefrontTab[] = ['Home', 'Search', 'Wishlist', 'Account', 'Cart'];
-const infoPages: StorefrontTab[] = ['About', 'Contact', 'Support'];
+const infoPages: StorefrontTab[] = ['About', 'Contact', 'Support', 'FAQ', 'Feedback', 'Terms', 'Privacy', 'Delivery'];
 
 export function getStorefrontTab(pathname: string, search = ''): StorefrontTab {
   const searchParams = new URLSearchParams(search);

@@ -25,6 +25,14 @@ test('about, contact and support pages resolve from direct routes', () => {
   assert.equal(getStorefrontTab('/support', ''), 'Support');
 });
 
+test('storefront information and policy pages resolve from direct routes', () => {
+  assert.equal(getStorefrontTab('/faq', ''), 'FAQ');
+  assert.equal(getStorefrontTab('/feedback', ''), 'Feedback');
+  assert.equal(getStorefrontTab('/terms', ''), 'Terms');
+  assert.equal(getStorefrontTab('/privacy', ''), 'Privacy');
+  assert.equal(getStorefrontTab('/delivery', ''), 'Delivery');
+});
+
 test('POS customer display opens from the root query route and legacy deep links', () => {
   const sessionId = 'a'.repeat(64);
   assert.equal(getPosCustomerDisplaySessionId('/', `?pos-display=${sessionId}`), sessionId);

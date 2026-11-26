@@ -28,7 +28,7 @@ const AdminPortal = lazy(() => import('./admin'));
 const PosTerminal = lazy(() => import('./pos').then((module) => ({ default: module.PosTerminal })));
 const PosCustomerDisplay = lazy(() => import('./pos').then((module) => ({ default: module.PosCustomerDisplay })));
 
-type Tab = 'Home' | 'Search' | 'Wishlist' | 'Account' | 'Cart' | 'Orders' | 'About' | 'Contact' | 'Support';
+type Tab = 'Home' | 'Search' | 'Wishlist' | 'Account' | 'Cart' | 'Orders' | 'About' | 'Contact' | 'Support' | 'FAQ' | 'Feedback' | 'Terms' | 'Privacy' | 'Delivery';
 type AdminView = 'dashboard' | 'pos' | 'customer-display' | null;
 type CartLine = { id: string; quantity: number };
 type CheckoutFulfillment = 'delivery' | 'pickup' | null;
@@ -459,6 +459,11 @@ function App() {
         {!isAdminRoute && tab === 'About' && <AboutPage />}
         {!isAdminRoute && tab === 'Contact' && <ContactPage form={contactForm} onChange={(field, value) => setContactForm((current) => ({ ...current, [field]: value }))} sending={contactSending} error={contactError} onSubmit={submitContact} />}
         {!isAdminRoute && tab === 'Support' && <SupportPage form={contactForm} onChange={(field, value) => setContactForm((current) => ({ ...current, [field]: value }))} sending={contactSending} error={contactError} onSubmit={submitContact} />}
+        {!isAdminRoute && tab === 'FAQ' && <FaqPage />}
+        {!isAdminRoute && tab === 'Feedback' && <FeedbackPage user={user} name={feedbackName} email={feedbackEmail} message={feedbackText} sending={feedbackSending} error={feedbackError} onNameChange={setFeedbackName} onEmailChange={setFeedbackEmail} onMessageChange={setFeedbackText} onSubmit={submitFeedback} />}
+        {!isAdminRoute && tab === 'Terms' && <TermsPage />}
+        {!isAdminRoute && tab === 'Privacy' && <PrivacyPage />}
+        {!isAdminRoute && tab === 'Delivery' && <DeliveryPage />}
         {!isAdminRoute && tab === 'Search' && <section className="content-page search-page">
           <div className="collection-hero">
             <div className="collection-hero-copy"><div className="eyebrow">{settings.collectionHeroEyebrow || defaultCollectionHeroSettings.eyebrow}</div><h1>{settings.collectionHeroTitle || defaultCollectionHeroSettings.title}</h1><p>{settings.collectionHeroText || defaultCollectionHeroSettings.text}</p><div className="collection-meta"><span>{storefrontLoading ? 'A curated collection' : `${products.length} curated fragrances`}</span><i /><span>Accra, Ghana</span></div></div>
@@ -816,7 +821,7 @@ function HomePage({ products: inventory, settings, storefrontError, onNavigate, 
     <footer className="site-footer"><a className="wordmark footer-wordmark" href="/" onClick={(e) => { e.preventDefault(); onNavigate('Home'); }}>
       <img className="footer-brand-logo" src="/IMAGES/PERFUME-NERD-LOGO.png" alt="" />
       <span className="footer-brand-copy"><span>THE PERFUME NERD</span></span>
-    </a><p>{settings.footerText || 'Exceptional fragrance, thoughtfully found.'}</p><div className="footer-links"><button onClick={() => onNavigate('Search')}>Shop all</button><button onClick={() => onNavigate('About')}>About us</button><button onClick={() => onNavigate('Contact')}>Contact us</button><button onClick={() => onNavigate('Support')}>Help &amp; support</button></div><small>© {new Date().getFullYear()} · Accra, Ghana</small></footer>
+    </a><p>{settings.footerText || 'Exceptional fragrance, thoughtfully found.'}</p><div className="footer-links"><button onClick={() => onNavigate('Search')}>Shop all</button><button onClick={() => onNavigate('About')}>About us</button><button onClick={() => onNavigate('Contact')}>Contact us</button><button onClick={() => onNavigate('Support')}>Help &amp; support</button><button onClick={() => onNavigate('FAQ')}>FAQs</button><button onClick={() => onNavigate('Feedback')}>Customer feedback</button><button onClick={() => onNavigate('Terms')}>Terms of service</button><button onClick={() => onNavigate('Privacy')}>Privacy policy</button><button onClick={() => onNavigate('Delivery')}>Delivery &amp; returns</button></div><small>© {new Date().getFullYear()} · Accra, Ghana</small></footer>
   </div>;
 }
 
@@ -844,6 +849,82 @@ function AboutPage() {
       </div>
       <blockquote className="about-quote">“Discover your scent. Define your presence.”<cite>THE PERFUME NERD · GHANA</cite></blockquote>
     </section>
+  </article>;
+}
+
+function FaqPage() {
+  const questions = [
+    { question: 'How do I place an order?', answer: 'Browse the collection, add your chosen fragrance to your bag and follow the checkout steps. You can pay securely online through the payment options presented at checkout.' },
+    { question: 'How can I check on my order?', answer: 'Use the Orders page and enter the order ID and email address used at checkout. If you need help, contact us with your order ID.' },
+    { question: 'Where do you deliver?', answer: 'We are based in Spintex, Accra. Delivery availability, fees and estimated timing are confirmed for your order during checkout or when we contact you. Pickup arrangements can also be discussed with our team.' },
+    { question: 'What if my order arrives damaged or incorrect?', answer: 'Please contact us as soon as possible with your order ID and a description of the issue. Keep the item and its packaging while we review the next steps.' },
+    { question: 'Can I return or exchange a fragrance?', answer: 'Please read our Delivery & Returns policy and contact us before sending anything back. We will confirm whether a return or exchange is eligible and how to proceed.' },
+    { question: 'How can I get fragrance advice?', answer: 'Visit Help & Support or contact us by phone, email or WhatsApp. We are happy to help you explore the collection.' },
+  ];
+
+  return <article className="content-page info-page policy-page">
+    <header className="info-page-heading"><div className="eyebrow">HELPFUL ANSWERS</div><h1>Frequently Asked Questions</h1><p>Quick answers about shopping with The Perfume Nerd. If you need a hand, our team is happy to help.</p></header>
+    <div className="faq-list">{questions.map(({ question, answer }) => <details className="faq-item" key={question}><summary>{question}</summary><p>{answer}</p></details>)}</div>
+    <p className="policy-contact">Still have a question? <a href="mailto:perfumenerd6@gmail.com">Email perfumenerd6@gmail.com</a> or call <a href="tel:+233554757454">+233 (0) 554757454</a>.</p>
+  </article>;
+}
+
+function FeedbackPage({ user, name, email, message, sending, error, onNameChange, onEmailChange, onMessageChange, onSubmit }: {
+  user: User | null;
+  name: string;
+  email: string;
+  message: string;
+  sending: boolean;
+  error: string;
+  onNameChange: (value: string) => void;
+  onEmailChange: (value: string) => void;
+  onMessageChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return <section className="content-page info-page feedback-page">
+    <header className="info-page-heading"><div className="eyebrow">CUSTOMER FEEDBACK</div><h1>Your experience matters.</h1><p>Tell us what you think about your experience with The Perfume Nerd. Your message goes to our team and is not published as a review on this site.</p></header>
+    <section className="contact-form-section">
+      <div className="eyebrow">WE’RE LISTENING</div><h2>Share your feedback</h2><p>Questions, suggestions and comments are all welcome.</p>
+      <form className="feedback-form" onSubmit={onSubmit}>
+        {!user && <><label className="form-label">Your name (optional)<input maxLength={100} autoComplete="name" value={name} onChange={(event) => onNameChange(event.target.value)} /></label><label className="form-label">Email (optional)<input type="email" maxLength={254} autoComplete="email" value={email} onChange={(event) => onEmailChange(event.target.value)} /></label></>}
+        <label className="form-label">Your message<textarea required minLength={5} maxLength={2000} rows={6} value={message} onChange={(event) => onMessageChange(event.target.value)} /></label>
+        {error && <p className="auth-error" role="alert">{error}</p>}
+        <button type="submit" className="primary-button full-button" disabled={sending}>{sending ? 'Sending…' : 'Send feedback'} <ArrowRight size={15} /></button>
+      </form>
+    </section>
+  </section>;
+}
+
+function TermsPage() {
+  return <article className="content-page info-page policy-page">
+    <header className="info-page-heading"><div className="eyebrow">STORE POLICIES</div><h1>Terms of Service</h1><p>These terms explain the basic conditions for using this storefront and placing an order with The Perfume Nerd.</p></header>
+    <section className="policy-section"><h2>Products and availability</h2><p>We aim to keep product descriptions, prices and availability up to date. Product images and descriptions are provided to help you choose; presentation may vary slightly from the item supplied. Orders are subject to product availability and confirmation by our team.</p></section>
+    <section className="policy-section"><h2>Orders and payment</h2><p>Please check your order details before submitting it. Payment is processed through the payment provider shown at checkout. An order confirmation or payment receipt does not change any rights you have under applicable law.</p></section>
+    <section className="policy-section"><h2>Delivery, returns and support</h2><p>Delivery and pickup arrangements, including any applicable fees and timing, are confirmed for each order. Please review our <a href="/delivery">Delivery &amp; Returns</a> policy for information about issues, returns and exchanges.</p></section>
+    <section className="policy-section"><h2>Using this website</h2><p>Please use the storefront lawfully and provide accurate information when placing an order or contacting us. We may update product information, these terms or site features as needed. Changes apply when published on this page.</p></section>
+    <p className="policy-contact">Questions about these terms? Contact <a href="mailto:perfumenerd6@gmail.com">perfumenerd6@gmail.com</a>.</p>
+  </article>;
+}
+
+function PrivacyPage() {
+  return <article className="content-page info-page policy-page">
+    <header className="info-page-heading"><div className="eyebrow">YOUR INFORMATION</div><h1>Privacy Policy</h1><p>This policy describes the information used to provide the storefront, process orders and respond to you.</p></header>
+    <section className="policy-section"><h2>Information you provide</h2><p>When you place an order, create an account, contact us or send feedback, we may receive details such as your name, email address, phone number, delivery information, order details and the message you send.</p></section>
+    <section className="policy-section"><h2>How information is used</h2><p>We use this information to process and fulfil orders, support your account, respond to questions, handle feedback and maintain the security and operation of the storefront.</p></section>
+    <section className="policy-section"><h2>Service providers and payments</h2><p>We use service providers to operate parts of the storefront, including account and order services. Payments are handled by the payment provider presented during checkout; payment information is subject to that provider’s terms and privacy practices. We do not publish customer feedback as reviews without permission.</p></section>
+    <section className="policy-section"><h2>Local storage and your choices</h2><p>This storefront stores your shopping bag and wishlist in your browser so they remain available when you return. You can clear this information using your browser settings. You can contact us to ask about personal information associated with your account or an order.</p></section>
+    <section className="policy-section"><h2>Contact</h2><p>For privacy questions or requests, email <a href="mailto:perfumenerd6@gmail.com">perfumenerd6@gmail.com</a>. We may update this policy when our practices or requirements change.</p></section>
+  </article>;
+}
+
+function DeliveryPage() {
+  return <article className="content-page info-page policy-page">
+    <header className="info-page-heading"><div className="eyebrow">ORDER INFORMATION</div><h1>Delivery &amp; Returns</h1><p>We want your fragrance to reach you in good condition. Here is how to arrange delivery, pickup or help with an order.</p></header>
+    <section className="policy-section"><h2>Delivery and pickup</h2><p>We are based in Spintex, Accra. Delivery availability, applicable fees and estimated timing depend on the order and destination; our team will confirm these details when your order is arranged. If pickup is available for your order, we will confirm the collection details with you.</p></section>
+    <section className="policy-section"><h2>Receiving your order</h2><p>Please provide accurate contact and delivery details and make sure someone is available to receive the order at the agreed time. If your details or availability change, contact us as soon as possible.</p></section>
+    <section className="policy-section"><h2>Damaged, incorrect or missing items</h2><p>Check your order when it arrives. If something is damaged, incorrect or missing, contact us promptly with your order ID and details of the issue. Keep the product and packaging while we review it and agree on the next steps.</p></section>
+    <section className="policy-section"><h2>Returns and exchanges</h2><p>Contact us before sending an item back so we can review the circumstances and confirm eligibility and instructions. Please keep the item unused and in its original packaging while we assess your request. Any resolution will be discussed with you and handled in line with applicable consumer law. Do not send a return without first contacting our team.</p></section>
+    <p className="policy-contact">For delivery or return help, email <a href="mailto:perfumenerd6@gmail.com">perfumenerd6@gmail.com</a> or call <a href="tel:+233554757454">+233 (0) 554757454</a>.</p>
   </article>;
 }
 
