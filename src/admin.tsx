@@ -1,14 +1,15 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { createPortal } from 'react-dom';
 import {
   collection, deleteDoc, doc, limit, onSnapshot, orderBy, query,
   serverTimestamp, setDoc, updateDoc,
 } from 'firebase/firestore';
-import { ArrowDownToLine, ArrowLeft, ArrowRight, Banknote, Check, ChevronDown, ClipboardList, Clock3, Image as ImageIcon, ImagePlus, LayoutDashboard, MessageSquare, Package, PackageX, Percent, Plus, Printer, Save, Search, Settings, ShoppingBag, ShoppingCart, Trash2, TrendingUp, Truck, Users, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeft, ArrowRight, Banknote, CalendarDays, Check, ChevronDown, ClipboardList, Clock3, Image as ImageIcon, ImagePlus, LayoutDashboard, MessageSquare, Package, PackageX, Percent, Plus, Printer, Save, Search, Settings, ShoppingBag, ShoppingCart, Trash2, TrendingUp, Truck, Users, X } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import { signOut } from 'firebase/auth';
 import { auth, db, isFirebaseConfigured } from './firebase';
 import { orderApi } from './order-api';
-import { formatOrderDateTime, formatOrderDay, formatOrderId, groupOrdersByDay, localDateInputValue, orderDateKey, searchOrders } from './order-management';
+import { filterOrdersByDateRange, formatOrderDateTime, formatOrderDay, formatOrderId, groupOrdersByDay, isFulfillmentAttended, localDateInputValue, searchOrders } from './order-management';
 import { getAdminOverviewMetrics, getRecentRevenue, revenueBarHeight } from './admin-overview';
 import { LoadedImage } from './LoadedImage';
 import { fragranceCategories, fragranceFamilies, getFragranceCategories, getFragranceFamilies, money, products as sampleProducts, type Fragrance, type FragranceFamily } from './catalog';
@@ -77,10 +78,17 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
   const [search, setSearch] = useState('');
   const [orderSearch, setOrderSearch] = useState('');
   const [printDialogOpen, setPrintDialogOpen] = useState(false);
-  const [printDate, setPrintDate] = useState(() => localDateInputValue(new Date()));
+  const [printStartDate, setPrintStartDate] = useState('');
+  const [printEndDate, setPrintEndDate] = useState('');
+  const [printSelectingEnd, setPrintSelectingEnd] = useState(false);
+  const [printCalendarMonth, setPrintCalendarMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<UploadTarget | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -178,9 +186,10 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
   const filteredOrders = useMemo(() => searchOrders(orders, orderSearch), [orders, orderSearch]);
   const groupedOrders = useMemo(() => groupOrdersByDay(filteredOrders), [filteredOrders]);
   const selectedPrintOrders = useMemo(
-    () => orders.filter((order) => orderDateKey(order.createdAt) === printDate),
-    [orders, printDate],
+    () => filterOrdersByDateRange(orders, printStartDate, printEndDate || printStartDate),
+    [orders, printStartDate, printEndDate],
   );
+  const selectedPrintOrderGroups = useMemo(() => groupOrdersByDay(selectedPrintOrders), [selectedPrintOrders]);
   const newFeedbackCount = feedback.filter((item) => item.status === 'new').length;
   const todayKey = localDateInputValue(new Date());
   const overviewMetrics = useMemo(() => getAdminOverviewMetrics(orders, sales, todayKey), [orders, sales, todayKey]);
@@ -498,7 +507,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
     }
   };
   const updateOrderStatus = async (orderId: string, status: string) => {
-    setBusy(true);
+    setUpdatingOrderId(orderId);
     clearAlerts();
     try {
       const result = await orderApi<{ smsStatus: string }>('/api/admin/orders/status', { orderId, status });
@@ -509,7 +518,7 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
     } catch (reason) {
       fail(reason, 'Order status could not be updated. Confirm the order is paid and try again.');
     } finally {
-      setBusy(false);
+      setUpdatingOrderId(null);
     }
   };
   const loadMoreUsers = async () => {
@@ -538,6 +547,52 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
     } catch (reason) {
       fail(reason, 'Could not sign out. Please try again.');
     }
+  };
+  useEffect(() => {
+    if (!printDialogOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPrintDialogOpen(false);
+    };
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [printDialogOpen]);
+  useEffect(() => {
+    if (!printDialogOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPrintDialogOpen(false);
+    };
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [printDialogOpen]);
+  const selectPrintCalendarDate = (date: string) => {
+    if (!printSelectingEnd || !printStartDate) {
+      setPrintStartDate(date);
+      setPrintEndDate('');
+      setPrintSelectingEnd(true);
+      return;
+    }
+    if (date < printStartDate) {
+      setPrintStartDate(date);
+      setPrintEndDate('');
+      return;
+    }
+    setPrintEndDate(date);
+    setPrintSelectingEnd(false);
+  };
+  const resetPrintDateRange = () => {
+    setPrintStartDate('');
+    setPrintEndDate('');
+    setPrintSelectingEnd(false);
   };
   const seedSamples = async () => {
     if (!db || !window.confirm('Import the clearly labelled development sample catalog into Firestore? Remove sample records before opening the store to customers.')) return;
@@ -662,44 +717,48 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
         </div>
         {groupedOrders.length > 0 ? groupedOrders.map(({ date, orders: dayOrders }) => <section className="admin-order-day" key={date}>
           <header className="admin-order-day-heading"><h3>{date === 'unknown' ? 'Date unavailable' : formatOrderDay(date)}</h3><span>{dayOrders.length} {dayOrders.length === 1 ? 'order' : 'orders'}</span></header>
-          <div className="admin-orders-list">{dayOrders.map((order) => <details className="admin-order-card" key={order.orderId}>
-            <summary className="admin-order-summary"><span><small>ORDER ID</small><strong>{formatOrderId(order.orderId)}</strong></span><strong className="admin-order-summary-total">{money(order.totalMinor / 100)}</strong><ChevronDown size={17} className="admin-order-chevron" aria-hidden="true" /></summary>
-            <div className="admin-order-expanded">
-              <header className="admin-order-heading"><div><span className="eyebrow">ORDER DETAILS</span><strong>{formatOrderId(order.orderId)}</strong><small>{formatOrderDateTime(order.createdAt)}</small></div>
-                <div className="admin-order-controls"><span className={`order-status-pill ${order.paymentStatus === 'paid' ? 'paid' : ''}`}>{order.paymentStatus.replaceAll('_', ' ')}</span>
-                  <label className="admin-status-select"><span>Fulfillment</span><select aria-label={`Update status for ${formatOrderId(order.orderId)}`} value={order.status} disabled={busy || order.paymentStatus !== 'paid'} onChange={(event) => void updateOrderStatus(order.orderId, event.target.value)}>
-                    {!['paid_needs_review', 'processing', 'ready_for_dispatch', 'dispatched', 'delivered'].includes(order.status) && <option value={order.status}>{order.status.replaceAll('_', ' ')}</option>}
-                    {order.status === 'paid_needs_review' && <option value="paid_needs_review">Needs stock review</option>}
-                    {['processing', 'ready_for_dispatch', 'dispatched', 'delivered'].map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}
-                  </select></label>
-                </div>
-              </header>
-              <div className="admin-order-details"><section><h3>Customer & delivery</h3><p><strong>{order.customer.name}</strong></p><p>{order.customer.email} · {order.customer.phone}</p><p>{order.customer.address}, {order.customer.city}, {order.customer.region}{order.customer.postalCode ? ` · ${order.customer.postalCode}` : ''}</p></section>
-                <section><h3>Items purchased</h3>{order.items.map((item) => <p className="admin-order-item" key={item.productId}><span>{item.name} · {item.brand} × {item.quantity}</span><strong>{money(item.lineTotalMinor / 100)}</strong></p>)}</section>
+          <div className="admin-orders-list">{dayOrders.map((order) => {
+            const attended = isFulfillmentAttended(order.status);
+            return <article className={`admin-order-card${attended ? ' attended' : ''}`} key={order.orderId}>
+              <div className="admin-order-card-top">
+                <details className="admin-order-disclosure">
+                  <summary className="admin-order-summary"><span><small>ORDER ID</small><strong>{formatOrderId(order.orderId)}</strong></span><strong className="admin-order-summary-total">{money(order.totalMinor / 100)}</strong><ChevronDown size={17} className="admin-order-chevron" aria-hidden="true" /></summary>
+                  <div className="admin-order-expanded">
+                    <header className="admin-order-heading"><div><span className="eyebrow">ORDER DETAILS</span><strong>{formatOrderId(order.orderId)}</strong><small>{formatOrderDateTime(order.createdAt)}</small></div>
+                      <div className="admin-order-controls"><span className={`order-status-pill ${order.paymentStatus === 'paid' ? 'paid' : ''}`}>{order.paymentStatus.replaceAll('_', ' ')}</span>
+                        <label className="admin-status-select"><span>Fulfillment</span><select aria-label={`Update status for ${formatOrderId(order.orderId)}`} value={order.status} disabled={updatingOrderId !== null || order.paymentStatus !== 'paid'} onChange={(event) => void updateOrderStatus(order.orderId, event.target.value)}>
+                          {!['paid_needs_review', 'processing', 'ready_for_dispatch', 'dispatched', 'delivered'].includes(order.status) && <option value={order.status}>{order.status.replaceAll('_', ' ')}</option>}
+                          {order.status === 'paid_needs_review' && <option value="paid_needs_review">Needs stock review</option>}
+                          {['processing', 'ready_for_dispatch', 'dispatched', 'delivered'].map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}
+                        </select></label>
+                      </div>
+                    </header>
+                    <div className="admin-order-details"><section><h3>Customer & delivery</h3><p><strong>{order.customer.name}</strong></p><p>{order.customer.email} · {order.customer.phone}</p><p>{order.customer.address}, {order.customer.city}, {order.customer.region}{order.customer.postalCode ? ` · ${order.customer.postalCode}` : ''}</p></section>
+                      <section><h3>Items purchased</h3>{order.items.map((item) => <p className="admin-order-item" key={item.productId}><span>{item.name} · {item.brand} × {item.quantity}</span><strong>{money(item.lineTotalMinor / 100)}</strong></p>)}</section>
+                    </div>
+                    <footer className="admin-order-total"><span>{order.paymentStatus === 'paid' ? 'Amount paid · GHS' : 'Payment · GHS'}</span><strong>{money(order.totalMinor / 100)}</strong></footer>
+                  </div>
+                </details>
+                {order.paymentStatus === 'paid' && (attended
+                  ? <span className="admin-order-attended" role="status"><Check size={15} /> Attended to</span>
+                  : order.status === 'processing' && <button type="button" className="admin-order-ready-button" disabled={updatingOrderId !== null} onClick={() => void updateOrderStatus(order.orderId, 'ready_for_dispatch')}><Truck size={15} />{updatingOrderId === order.orderId ? 'Updating…' : 'Ready to dispatch'}</button>)}
               </div>
-              <footer className="admin-order-total"><span>{order.paymentStatus === 'paid' ? 'Amount paid · GHS' : 'Payment · GHS'}</span><strong>{money(order.totalMinor / 100)}</strong></footer>
-            </div>
-          </details>)}</div>
+            </article>;
+          })}</div>
         </section>) : <div className="admin-panel admin-empty-note">{orders.length === 0 ? 'Customer orders will appear here after checkout.' : 'No orders match your search.'}</div>}
-        {printDialogOpen && <div className="admin-print-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPrintDialogOpen(false); }}>
-          <section className="admin-print-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-print-title">
-            <button type="button" className="icon-button admin-print-close" aria-label="Close print dialog" onClick={() => setPrintDialogOpen(false)}><X size={18} /></button>
-            <span className="eyebrow">DAILY ORDER REPORT</span><h2 id="admin-print-title">Choose an order date</h2>
-            <label className="form-label">Date<input type="date" value={printDate} onChange={(event) => setPrintDate(event.target.value)} /></label>
-            <p>{selectedPrintOrders.length} {selectedPrintOrders.length === 1 ? 'order' : 'orders'} for this date. Use the print dialog to print or save as PDF.</p>
-            <div className="admin-form-actions"><button type="button" className="outline-button" onClick={() => setPrintDialogOpen(false)}>Cancel</button><button type="button" className="primary-button" disabled={!selectedPrintOrders.length} onClick={() => window.print()}><ArrowDownToLine size={16} /> Print / Save PDF</button></div>
-          </section>
-        </div>}
         <div className="admin-order-print-sheet" aria-hidden="true">
           <h1>THE PERFUME NERD | Daily Orders</h1>
-          <h2>{formatOrderDay(printDate)}</h2>
-          <p>{selectedPrintOrders.length} {selectedPrintOrders.length === 1 ? 'order' : 'orders'}</p>
-          {selectedPrintOrders.map((order) => <article className="admin-order-print-card" key={order.orderId}>
+          <h2>{printStartDate ? (printEndDate ? `${formatOrderDay(printStartDate)} – ${formatOrderDay(printEndDate)}` : formatOrderDay(printStartDate)) : 'No dates selected'}</h2>
+          <p>{selectedPrintOrders.length} {selectedPrintOrders.length === 1 ? 'order' : 'orders'} across {selectedPrintOrderGroups.length} {selectedPrintOrderGroups.length === 1 ? 'day' : 'days'}</p>
+          {selectedPrintOrderGroups.map(({ date, orders: dayOrders }) => <section className="admin-order-print-day" key={date}>
+            <h3>{formatOrderDay(date)}</h3>
+            {dayOrders.map((order) => <article className="admin-order-print-card" key={order.orderId}>
             <header><div><strong>{formatOrderId(order.orderId)}</strong><small>{formatOrderDateTime(order.createdAt)}</small></div><strong>{money(order.totalMinor / 100)}</strong></header>
             <p><strong>{order.customer.name}</strong><br />{order.customer.email} · {order.customer.phone}<br />{order.customer.address}, {order.customer.city}, {order.customer.region}{order.customer.postalCode ? ` · ${order.customer.postalCode}` : ''}</p>
             <ul>{order.items.map((item) => <li key={item.productId}>{item.name} · {item.brand} × {item.quantity} · {money(item.lineTotalMinor / 100)}</li>)}</ul>
             <footer>{order.paymentStatus.replaceAll('_', ' ')} · {order.status.replaceAll('_', ' ')}</footer>
-          </article>)}
+            </article>)}
+          </section>)}
         </div>
       </section>}
       {section === 'users' && <section className="admin-content"><div className="admin-section-heading"><div><h2>Registered users</h2><p>Customer accounts and saved contact numbers.</p></div><span className="feedback-count">{totalUsers === null ? (usersLoading ? 'Loading…' : 'Not available') : `${totalUsers} total`}</span></div>
@@ -857,6 +916,90 @@ export default function AdminPortal({ user, loading, isAdmin, claimLoading, clai
       {section === 'feedback' && <section className="admin-content"><div className="admin-section-heading"><div><h2>Customer feedback</h2><p>Messages submitted from the storefront, updating live.</p></div><span className="feedback-count">{newFeedbackCount} new</span></div>
         <div className="admin-feedback-list">{feedback.map((item) => <article className="admin-feedback-card" key={item.id}><div className="admin-feedback-head"><div><span className={`feedback-status ${item.status}`}>{item.status}</span><h3>{item.name || 'Guest customer'}</h3><p>{item.email || 'No email provided'}{item.createdAt ? ` · ${item.createdAt.toDate().toLocaleString()}` : ''}</p></div></div><blockquote>{item.message}</blockquote><div className="admin-feedback-actions">{item.status !== 'resolved' && <button className="outline-button" onClick={() => void updateFeedbackStatus(item, 'resolved')}><Check size={14} /> Mark resolved</button>}{item.status === 'new' && <button className="text-button" onClick={() => void updateFeedbackStatus(item, 'read')}>Mark as read</button>}</div></article>)}{feedback.length === 0 && <div className="admin-panel admin-empty-note">No feedback yet. Customer messages from the main storefront will appear here.</div>}</div>
       </section>}
+      {printDialogOpen && <AdminPrintReportDialog
+        startDate={printStartDate}
+        endDate={printEndDate}
+        selectingEnd={printSelectingEnd}
+        month={printCalendarMonth}
+        orderCount={selectedPrintOrders.length}
+        onSelectDate={selectPrintCalendarDate}
+        onChangeMonth={setPrintCalendarMonth}
+        onResetRange={resetPrintDateRange}
+        onClose={() => setPrintDialogOpen(false)}
+        onPrint={() => window.print()}
+      />}
     </div>
   </main>;
+}
+
+function AdminPrintReportDialog({ startDate, endDate, selectingEnd, month, orderCount, onSelectDate, onChangeMonth, onResetRange, onClose, onPrint }: {
+  startDate: string;
+  endDate: string;
+  selectingEnd: boolean;
+  month: Date;
+  orderCount: number;
+  onSelectDate: (date: string) => void;
+  onChangeMonth: (month: Date) => void;
+  onResetRange: () => void;
+  onClose: () => void;
+  onPrint: () => void;
+}) {
+  const monthStart = new Date(month.getFullYear(), month.getMonth(), 1);
+  const offset = monthStart.getDay();
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const cells = Array.from({ length: 42 }, (_, index) => {
+    const day = index - offset + 1;
+    return day > 0 && day <= daysInMonth ? day : null;
+  });
+  const end = endDate || startDate;
+  const monthLabel = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(month);
+  const rangeLabel = !startDate
+    ? 'Choose a start date'
+    : endDate
+    ? `${formatOrderDay(startDate)} – ${formatOrderDay(endDate)}`
+    : `${formatOrderDay(startDate)} · ${selectingEnd ? 'Choose an end date' : 'Single-day report'}`;
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div className="admin-print-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="admin-print-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-print-title">
+        <button type="button" className="icon-button admin-print-close" aria-label="Close print dialog" onClick={onClose}><X size={18} /></button>
+        <span className="eyebrow">ORDER REPORT</span><h2 id="admin-print-title">Choose report dates</h2>
+        <p className="admin-print-instructions">{selectingEnd ? 'Select a start date, then choose an end date to include every day in between.' : 'Date range selected. Choose another date to start a new range or print the report.'}</p>
+        <div className="admin-calendar">
+          <div className="admin-calendar-heading">
+            <button type="button" className="icon-button" aria-label="Previous month" onClick={() => onChangeMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}><ArrowLeft size={17} /></button>
+            <strong>{monthLabel}</strong>
+            <button type="button" className="icon-button" aria-label="Next month" onClick={() => onChangeMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}><ArrowRight size={17} /></button>
+          </div>
+          <div className="admin-calendar-grid" role="group" aria-label={monthLabel}>
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => <span className="admin-calendar-weekday" key={day}>{day}</span>)}
+            {cells.map((day, index) => {
+              if (!day) return <span className="admin-calendar-empty" aria-hidden="true" key={`empty-${index}`} />;
+              const date = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              const isSelected = Boolean(startDate) && (date === startDate || (Boolean(endDate) && date === endDate));
+              const isInRange = Boolean(startDate) && date >= startDate && date <= end;
+              return <button type="button" aria-pressed={isSelected} aria-label={formatOrderDay(date)} className={`admin-calendar-day${isSelected ? ' selected' : ''}${isInRange ? ' in-range' : ''}`} key={date} onClick={() => onSelectDate(date)}>{day}</button>;
+            })}
+          </div>
+          <div className="admin-calendar-footer"><div className="admin-calendar-range"><CalendarDays size={16} /><span>{rangeLabel}</span></div><button type="button" className="text-button" onClick={onResetRange}>Clear dates</button></div>
+        </div>
+        <p className="admin-print-count">{orderCount} {orderCount === 1 ? 'order' : 'orders'} in this date range. The printout includes orders for each day.</p>
+        <div className="admin-form-actions"><button type="button" className="outline-button" onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={!orderCount || !startDate || selectingEnd} onClick={onPrint}><ArrowDownToLine size={16} /> Print / Save PDF</button></div>
+      </section>
+    </div>,
+    document.body,
+  );
 }

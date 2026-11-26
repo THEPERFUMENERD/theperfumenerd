@@ -70,6 +70,22 @@ export function groupOrdersByDay<T extends { createdAt?: OrderDateValue }>(order
     .map(([date, dayOrders]) => ({ date, orders: dayOrders }));
 }
 
+export function filterOrdersByDateRange<T extends { createdAt?: OrderDateValue }>(
+  orders: T[],
+  startDate: string,
+  endDate = startDate,
+): T[] {
+  if (!startDate) return [];
+  return orders.filter((order) => {
+    const date = orderDateKey(order.createdAt);
+    return date !== 'unknown' && date >= startDate && date <= endDate;
+  });
+}
+
+export function isFulfillmentAttended(status: string): boolean {
+  return ['ready_for_dispatch', 'dispatched', 'delivered'].includes(status);
+}
+
 export function localDateInputValue(date: Date): string {
   return orderDateKey(date);
 }

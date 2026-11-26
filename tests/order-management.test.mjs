@@ -3,7 +3,9 @@ import { test } from 'node:test';
 import {
   formatOrderId,
   formatOrderDay,
+  filterOrdersByDateRange,
   groupOrdersByDay,
+  isFulfillmentAttended,
   orderDateKey,
   searchOrders,
 } from '../src/order-management.ts';
@@ -27,6 +29,30 @@ test('orders are grouped by their local calendar day in newest-day-first order',
   assert.equal(orderDateKey(undefined), 'unknown');
   assert.equal(orderDateKey('2026-11-17T00:30:00.000Z'), '2026-11-17');
   assert.match(formatOrderDay('2026-11-17'), /November 17, 2026/);
+});
+
+test('daily report date range includes every matching day and excludes unknown dates', () => {
+  const orders = [
+    { orderId: 'start', createdAt: '2026-11-01T10:00:00.000Z' },
+    { orderId: 'middle', createdAt: '2026-11-03T10:00:00.000Z' },
+    { orderId: 'end', createdAt: '2026-11-05T10:00:00.000Z' },
+    { orderId: 'outside', createdAt: '2026-11-06T10:00:00.000Z' },
+    { orderId: 'unknown' },
+  ];
+
+  assert.deepEqual(filterOrdersByDateRange(orders, '2026-11-01', '2026-11-05').map((order) => order.orderId), [
+    'start', 'middle', 'end',
+  ]);
+  assert.deepEqual(filterOrdersByDateRange(orders, '2026-11-03').map((order) => order.orderId), ['middle']);
+  assert.deepEqual(filterOrdersByDateRange(orders, '').map((order) => order.orderId), []);
+});
+
+test('orders are marked attended once ready for dispatch or further along', () => {
+  assert.equal(isFulfillmentAttended('processing'), false);
+  assert.equal(isFulfillmentAttended('ready_for_dispatch'), true);
+  assert.equal(isFulfillmentAttended('dispatched'), true);
+  assert.equal(isFulfillmentAttended('delivered'), true);
+  assert.equal(isFulfillmentAttended('paid_needs_review'), false);
 });
 
 test('order search matches full or compact IDs, customer name, email and phone', () => {

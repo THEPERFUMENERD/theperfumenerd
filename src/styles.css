@@ -1292,7 +1292,15 @@ img { display: block; max-width: 100%; }
 .guest-order-form .auth-error { grid-column: 1 / -1; }
 .guest-order-panel > .orders-list { margin-top: 15px; }
 
-.admin-order-card { border-radius: 16px; }
+.admin-order-card { border-radius: 16px; transition: background .2s ease, border-color .2s ease, opacity .2s ease; }
+.admin-order-card.attended { border-color: #d7e6d1; background: linear-gradient(110deg, #f3f8f1, #fff 62%); }
+.admin-order-card-top { display: flex; align-items: stretch; gap: 12px; }
+.admin-order-disclosure { min-width: 0; flex: 1 1 auto; }
+.admin-order-ready-button, .admin-order-attended { min-height: 38px; align-self: center; display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 7px; margin-right: 14px; padding: 0 13px; border-radius: 999px; font-size: 9px; font-weight: 650; white-space: nowrap; }
+.admin-order-ready-button { border: 1px solid #d5c6b4; background: #f8f3ed; color: #604d39; cursor: pointer; transition: background .18s ease, border-color .18s ease, transform .18s ease; }
+.admin-order-ready-button:hover:not(:disabled) { transform: translateY(-1px); border-color: #bca58b; background: #efe5d9; }
+.admin-order-ready-button:disabled { opacity: .62; cursor: wait; }
+.admin-order-attended { border: 1px solid #cfe0c8; background: #eaf3e6; color: #41663c; }
 .admin-order-day { margin-top: 23px; }
 .admin-order-day-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0 2px 10px; }
 .admin-order-day-heading h3 { margin: 0; font-family: var(--serif); font-size: 19px; font-weight: 500; }
@@ -1308,17 +1316,36 @@ img { display: block; max-width: 100%; }
 .admin-order-summary > span strong { overflow-wrap: anywhere; font-size: 13px; letter-spacing: .035em; }
 .admin-order-summary-total { white-space: nowrap; font-size: 15px; }
 .admin-order-chevron { color: #817a70; transition: transform .18s ease; }
-.admin-order-card[open] .admin-order-chevron { transform: rotate(180deg); }
+.admin-order-disclosure[open] .admin-order-chevron { transform: rotate(180deg); }
 .admin-order-expanded { padding: 0 17px 16px; border-top: 1px solid #f0ede8; }
 .admin-order-expanded > .admin-order-heading { padding-top: 14px; }
-.admin-order-print-backdrop { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(37,35,33,.43); backdrop-filter: blur(5px); }
-.admin-print-dialog { position: relative; width: min(100%, 430px); padding: 26px; border: 1px solid rgba(37,35,33,.1); border-radius: 18px; background: #fff; box-shadow: 0 24px 70px rgba(37,35,33,.22); }
-.admin-print-dialog h2 { margin: 7px 30px 16px 0; font-family: var(--serif); font-size: 26px; font-weight: 500; }
-.admin-print-dialog .form-label { display: grid; gap: 7px; }
-.admin-print-dialog .form-label input { min-height: 44px; padding: 0 12px; border: 1px solid #ded8cf; border-radius: 9px; background: #fff; font-size: 13px; }
-.admin-print-dialog > p { margin: 12px 0 20px; color: #77716a; font-size: 11px; line-height: 1.6; }
+.admin-order-print-backdrop { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; overflow-y: auto; padding: 20px; background: rgba(37,35,33,.48); backdrop-filter: blur(7px); }
+.admin-print-dialog { position: relative; width: min(100%, 460px); max-height: min(90vh, 780px); overflow-y: auto; padding: 27px; border: 1px solid rgba(255,255,255,.82); border-radius: 24px; background: linear-gradient(160deg, #fff 0%, #fbf9f6 100%); box-shadow: 0 28px 90px rgba(25,21,17,.28), 0 2px 8px rgba(25,21,17,.06); animation: fade-in .18s ease-out; }
+.admin-print-dialog > .eyebrow { color: #8d6e4e; }
+.admin-print-dialog h2 { margin: 7px 30px 8px 0; font-family: var(--serif); font-size: 29px; font-weight: 500; letter-spacing: -.025em; }
+.admin-print-instructions { margin: 0 0 18px; color: #77716a; font-size: 11px; line-height: 1.65; }
+.admin-calendar { padding: 14px; border: 1px solid #eee8df; border-radius: 18px; background: rgba(255,255,255,.82); box-shadow: 0 8px 25px rgba(48,39,29,.045); }
+.admin-calendar-heading { display: grid; grid-template-columns: 38px 1fr 38px; align-items: center; margin-bottom: 12px; }
+.admin-calendar-heading strong { color: #39342e; font-family: var(--serif); font-size: 18px; font-weight: 500; text-align: center; }
+.admin-calendar-heading .icon-button { width: 36px; height: 36px; border: 1px solid #eee8df; border-radius: 50%; background: #fff; }
+.admin-calendar-heading .icon-button:last-child { justify-self: end; }
+.admin-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.admin-calendar-weekday { display: grid; min-height: 28px; place-items: center; color: #958b7e; font-size: 9px; font-weight: 700; letter-spacing: .04em; }
+.admin-calendar-empty, .admin-calendar-day { min-width: 0; aspect-ratio: 1; }
+.admin-calendar-day { display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #49443d; font-size: 11px; cursor: pointer; transition: background .16s ease, color .16s ease, transform .16s ease; }
+.admin-calendar-day:hover { background: #f0e9df; transform: scale(1.06); }
+.admin-calendar-day.in-range { border-radius: 10px; background: #f2ece4; color: #5e4d3b; }
+.admin-calendar-day.selected, .admin-calendar-day.selected:hover { border-radius: 50%; background: #302a24; color: #fff; box-shadow: 0 3px 9px rgba(48,42,36,.2); transform: none; }
+.admin-calendar-day:focus-visible { outline: 2px solid #a48a6f; outline-offset: 2px; }
+.admin-calendar-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #f0ebe4; }
+.admin-calendar-range { min-width: 0; display: flex; align-items: center; gap: 8px; color: #655746; font-size: 10px; font-weight: 600; }
+.admin-calendar-range svg { flex: 0 0 auto; color: #8d6e4e; }
+.admin-calendar-footer .text-button { flex: 0 0 auto; font-size: 9px; }
+.admin-print-count { margin: 15px 0 0; color: #77716a; font-size: 11px; line-height: 1.6; }
 .admin-print-close { position: absolute; top: 13px; right: 13px; }
 .admin-order-print-sheet { display: none; }
+.admin-order-print-day { break-inside: avoid; }
+.admin-order-print-day > h3 { margin: 15px 0 9px; padding-bottom: 5px; border-bottom: 1px solid #bbb; font-size: 12px; }
 .admin-order-controls { display: flex; align-items: center; gap: 10px; }
 .admin-status-select { display: grid; gap: 4px; color: #8a847b; font-size: 8px; }
 .admin-status-select select { min-height: 34px; max-width: 170px; padding: 0 9px; border: 1px solid #e3ded6; border-radius: 8px; background: #fff; color: #393631; font-size: 10px; text-transform: capitalize; }
@@ -1355,6 +1382,9 @@ img { display: block; max-width: 100%; }
   .admin-order-expanded { padding: 0 12px 13px; }
   .admin-order-day-heading h3 { font-size: 17px; }
   .admin-print-dialog { padding: 22px 18px; }
+  .admin-order-card-top { align-items: center; flex-wrap: wrap; gap: 0 8px; padding-bottom: 10px; }
+  .admin-order-disclosure { flex-basis: 100%; }
+  .admin-order-ready-button, .admin-order-attended { min-height: 34px; margin: 0 12px 0 auto; }
 }
 @media (max-width: 480px) {
   .guest-order-form { grid-template-columns: 1fr; }
