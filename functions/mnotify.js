@@ -21,7 +21,7 @@ export async function sendMnotifySms({
   phone,
   message,
   apiKey = process.env.MNOTIFY_API_KEY,
-  senderId = process.env.MNOTIFY_SENDER_ID || 'PERFUMENERD',
+  senderId = process.env.MNOTIFY_SENDER_ID || 'PerfumeNerd',
   fetchImpl = fetch,
 }) {
   if (typeof apiKey !== 'string' || !apiKey.trim()) {

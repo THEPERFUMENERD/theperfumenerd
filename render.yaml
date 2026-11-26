@@ -27,7 +27,7 @@ services:
       - key: MNOTIFY_API_KEY
         sync: false
       - key: MNOTIFY_SENDER_ID
-        value: PERFUMENERD
+        value: PerfumeNerd
       - key: PUBLIC_STORE_URL
         value: https://theperfumenerd.onrender.com
       - key: ALLOWED_ORIGINS

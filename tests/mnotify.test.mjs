@@ -23,6 +23,7 @@ test('sends an SMS using the configured sender and server API key', async () => 
     phone: '024 123 4567',
     message: 'Welcome.',
     apiKey: 'server-test-key',
+    senderId: 'PerfumeNerd',
     fetchImpl: async (url, options) => {
       requestUrl = url;
       requestOptions = options;
@@ -34,12 +35,27 @@ test('sends an SMS using the configured sender and server API key', async () => 
   assert.equal(requestOptions.method, 'POST');
   assert.deepEqual(JSON.parse(requestOptions.body), {
     recipient: ['0241234567'],
-    sender: 'PERFUMENERD',
+    sender: 'PerfumeNerd',
     message: 'Welcome.',
     is_schedule: false,
     schedule_date: '',
   });
   assert.deepEqual(result, { status: 'success' });
+});
+
+test('uses the PerfumeNerd sender ID when none is provided', async () => {
+  let requestOptions;
+  await sendMnotifySms({
+    phone: '0241234567',
+    message: 'Welcome.',
+    apiKey: 'server-test-key',
+    fetchImpl: async (_url, options) => {
+      requestOptions = options;
+      return { ok: true, status: 200, json: async () => ({ status: 'success' }) };
+    },
+  });
+
+  assert.equal(JSON.parse(requestOptions.body).sender, 'PerfumeNerd');
 });
 
 test('does not send with a missing key or invalid sender ID', async () => {

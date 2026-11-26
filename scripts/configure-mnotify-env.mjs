@@ -51,7 +51,7 @@ for (const line of targetContents.split(/\r?\n/)) {
   }
 }
 values.set('MNOTIFY_API_KEY', apiKey);
-values.set('MNOTIFY_SENDER_ID', 'PERFUMENERD');
+values.set('MNOTIFY_SENDER_ID', 'PerfumeNerd');
 
 await writeFile(
   functionsEnvPath,
