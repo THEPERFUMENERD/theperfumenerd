@@ -42,7 +42,7 @@ type ContactPageProps = {
   error: string;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
-const adminEmailAllowlist = new Set(['perfumenerd6@gmail.com']);
+const adminEmailAllowlist = new Set(['perfumenerd6@gmail.com', 'asiedud41@gmail.com']);
 const tabNames: Tab[] = ['Home', 'Search', 'Wishlist', 'Account', 'Cart'];
 const isValidPhoneNumber = (value: string) => {
   const compact = value.trim().replace(/[\s()+.-]/g, '');
@@ -175,7 +175,7 @@ function App() {
         && token.claims.email_verified === true
         && typeof token.claims.email === 'string'
         && adminEmailAllowlist.has(token.claims.email.toLowerCase());
-      setIsAdmin(token.claims.admin === true || verifiedAllowlistedEmail);
+      setIsAdmin(verifiedAllowlistedEmail);
       setAdminClaimLoading(false);
       setAdminClaimError('');
     }).catch((reason: unknown) => {

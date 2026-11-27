@@ -49,8 +49,16 @@ test('public customers can query visible products but cannot access hidden produ
   await assertFails(setDoc(doc(publicDb, 'products', 'attack'), { name: 'Untrusted', visible: true }));
 });
 
-test('only trusted admins and the verified allowlisted account can manage storefront products', async () => {
-  const adminDb = environment.authenticatedContext('administrator', { admin: true }).firestore();
+test('only the two verified allowlisted accounts can manage storefront products', async () => {
+  const adminDb = environment.authenticatedContext('administrator', {
+    email: 'asiedud41@gmail.com',
+    email_verified: true,
+  }).firestore();
+  const claimOnlyAdminDb = environment.authenticatedContext('claim-only-admin', {
+    email: 'customer@example.com',
+    email_verified: true,
+    admin: true,
+  }).firestore();
   const allowlistedDb = environment.authenticatedContext('allowlisted-admin', {
     email: 'perfumenerd6@gmail.com',
     email_verified: true,
@@ -75,6 +83,9 @@ test('only trusted admins and the verified allowlisted account can manage storef
   }));
   await assertFails(setDoc(doc(otherEmailDb, 'products', 'customer-fragrance'), {
     name: 'Customer fragrance', visible: true, price: 1200, stock: 5,
+  }));
+  await assertFails(setDoc(doc(claimOnlyAdminDb, 'products', 'claim-only-fragrance'), {
+    name: 'Claim-only fragrance', visible: true, price: 1200, stock: 5,
   }));
   await assertFails(setDoc(doc(customerDb, 'products', 'another'), { name: 'No', visible: true }));
   await assertSucceeds(setDoc(doc(adminDb, 'storeSettings', 'public'), { heroTitle: 'A new story' }));
@@ -143,7 +154,10 @@ test('customers can read only their own orders and nobody can write orders from 
   const customerDb = environment.authenticatedContext('customer').firestore();
   const otherDb = environment.authenticatedContext('another-customer').firestore();
   const guestDb = environment.unauthenticatedContext().firestore();
-  const adminDb = environment.authenticatedContext('administrator', { admin: true }).firestore();
+  const adminDb = environment.authenticatedContext('administrator', {
+    email: 'asiedud41@gmail.com',
+    email_verified: true,
+  }).firestore();
   const ownOrders = query(collection(customerDb, 'orders'), where('userId', '==', 'customer'));
   await assertSucceeds(getDocs(ownOrders));
   await assertFails(getDoc(doc(otherDb, 'orders', 'TPN-20260101-A1B2C3D4')));
@@ -155,7 +169,10 @@ test('customers can read only their own orders and nobody can write orders from 
 });
 
 test('POS records are backend-only and customer display links reveal only their active cart', async () => {
-  const adminDb = environment.authenticatedContext('administrator', { admin: true }).firestore();
+  const adminDb = environment.authenticatedContext('administrator', {
+    email: 'asiedud41@gmail.com',
+    email_verified: true,
+  }).firestore();
   const customerDb = environment.authenticatedContext('customer').firestore();
   const guestDb = environment.unauthenticatedContext().firestore();
   const displayToken = 'a'.repeat(64);
@@ -205,7 +222,10 @@ test('customers may send bounded feedback but only admins can read or moderate i
     status: 'new',
     createdAt: serverTimestamp(),
   }));
-  const adminDb = environment.authenticatedContext('administrator', { admin: true }).firestore();
+  const adminDb = environment.authenticatedContext('administrator', {
+    email: 'asiedud41@gmail.com',
+    email_verified: true,
+  }).firestore();
   await assertSucceeds(getDoc(doc(adminDb, 'feedback', feedback.id)));
   await assertSucceeds(updateDoc(doc(adminDb, 'feedback', feedback.id), {
     status: 'resolved',
@@ -215,10 +235,23 @@ test('customers may send bounded feedback but only admins can read or moderate i
   await assertFails(uploadBytes(ref(guestStorage, 'product-images/guest/image.png'), new Uint8Array([1, 2, 3]), { contentType: 'image/png' }));
 });
 
-test('administrator uploads require trusted admin access and are image/size constrained', async () => {
-  const adminStorage = environment.authenticatedContext('administrator', { admin: true }).storage();
+test('administrator uploads require one of the two verified allowlisted accounts and are image/size constrained', async () => {
+  const adminStorage = environment.authenticatedContext('administrator', {
+    email: 'asiedud41@gmail.com',
+    email_verified: true,
+  }).storage();
   const adminImage = ref(adminStorage, 'product-images/administrator/image.png');
   await assertSucceeds(uploadBytes(adminImage, new Uint8Array([1, 2, 3]), { contentType: 'image/png' }));
+  const claimOnlyStorage = environment.authenticatedContext('claim-only-admin', {
+    email: 'customer@example.com',
+    email_verified: true,
+    admin: true,
+  }).storage();
+  await assertFails(uploadBytes(
+    ref(claimOnlyStorage, 'product-images/claim-only-admin/image.png'),
+    new Uint8Array([1, 2, 3]),
+    { contentType: 'image/png' },
+  ));
   const allowlistedStorage = environment.authenticatedContext('allowlisted-admin', {
     email: 'perfumenerd6@gmail.com',
     email_verified: true,

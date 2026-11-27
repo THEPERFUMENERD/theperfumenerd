@@ -7,6 +7,7 @@ import { normalizeSmsRecipient, selectOrderSmsPhone, sendMnotifySms } from './mn
 
 if (getApps().length === 0) initializeApp();
 const db = getFirestore();
+const ADMIN_EMAILS = new Set(['perfumenerd6@gmail.com', 'asiedud41@gmail.com']);
 const ADMIN_EMAIL = 'perfumenerd6@gmail.com';
 const paymentReminderInitialDelayMs = 2 * 60 * 60 * 1000;
 const paymentReminderFollowupDelayMs = 10 * 60 * 60 * 1000;
@@ -740,8 +741,8 @@ export const listAdminUsers = onCall(async (request) => {
 
 function isAdministrator(auth) {
   if (!auth) return false;
-  return auth.token.admin === true
-    || (auth.token.email === ADMIN_EMAIL && auth.token.email_verified === true);
+  return auth.token.email_verified === true
+    && ADMIN_EMAILS.has(normalizedEmail(auth.token.email));
 }
 
 function validateSaleRequest(data) {

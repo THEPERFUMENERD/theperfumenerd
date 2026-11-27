@@ -6,7 +6,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 
 const projectId = 'demo-perfume-nerd';
-const adminEmail = 'perfumenerd6@gmail.com';
+const adminEmail = 'asiedud41@gmail.com';
 const adminPassword = `TpnTest-${randomUUID()}-A1!`;
 const customerEmail = `customer-${randomUUID()}@example.test`;
 const customerPassword = `TpnTest-${randomUUID()}-A1!`;
@@ -66,6 +66,7 @@ before(async () => {
     password: customerPassword,
     emailVerified: true,
   });
+  await adminAuth.setCustomUserClaims(customer.uid, { admin: true });
   adminUid = adminUser.uid;
   customerUid = customer.uid;
   adminToken = await signIn(adminEmail, adminPassword);

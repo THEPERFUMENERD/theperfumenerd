@@ -3,11 +3,12 @@ service firebase.storage {
   match /b/{bucket}/o {
     function isAdmin() {
       return request.auth != null
-        && ((request.auth.token.keys().hasAll(['admin'])
-            && request.auth.token.admin == true)
-          || (request.auth.token.keys().hasAll(['email', 'email_verified'])
-            && request.auth.token.email == 'perfumenerd6@gmail.com'
-            && request.auth.token.email_verified == true));
+        && request.auth.token.keys().hasAll(['email', 'email_verified'])
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in [
+          'perfumenerd6@gmail.com',
+          'asiedud41@gmail.com'
+        ];
     }
 
     function validImage() {

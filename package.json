@@ -7,7 +7,6 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "admin:grant": "node --env-file=.env.local scripts/grant-admin.mjs",
     "cloudinary:setup": "node scripts/configure-cloudinary-uploads.mjs",
     "mnotify:configure": "node scripts/configure-mnotify-env.mjs",
     "paystack:configure": "node scripts/configure-paystack-env.mjs",
