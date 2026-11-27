@@ -4,7 +4,7 @@ import {
   MapPin, Menu, MessageCircle, Minus, Phone, Plus, Search, ShoppingBag,
   SlidersHorizontal, X,
 } from 'lucide-react';
-import { getFragranceCategories, money, optimizedProductImage, type Fragrance } from './catalog';
+import { getFragranceCategories, getProductType, isPerfumeProduct, money, optimizedProductImage, type Fragrance } from './catalog';
 import { auth, authPersistence, db, isFirebaseConfigured } from './firebase';
 import { LoadedImage } from './LoadedImage';
 import { applyStorefrontDiscounts } from './discounts';
@@ -225,16 +225,16 @@ function App() {
     const normalized = query.trim().toLowerCase();
     const results = storefrontProducts.filter((product) => {
       const matchesQuery = !normalized || [
-        product.name, product.brand, product.family, ...getFragranceCategories(product), product.concentration,
+        product.name, product.brand, product.family, getProductType(product), ...getFragranceCategories(product), product.concentration,
         ...product.notes, ...product.occasion,
       ].some((value) => value.toLowerCase().includes(normalized));
       const matchesCategory = category === 'All' || getFragranceCategories(product).some((item) => item === category);
-      const matchesFamily = filters.family === 'All families' || product.family === filters.family;
+      const matchesFamily = filters.family === 'All families' || (isPerfumeProduct(product) && product.family === filters.family);
       const matchesStock = filters.availability !== 'In stock only' || product.stock > 0;
       const matchesBrand = filters.brand === 'All brands' || product.brand === filters.brand;
       const matchesPrice = filters.price === 'Any price' || product.price <= Number(filters.price);
-      const matchesConcentration = filters.concentration === 'All concentrations' || product.concentration === filters.concentration;
-      const matchesOccasion = filters.occasion === 'Any occasion' || product.occasion.includes(filters.occasion);
+      const matchesConcentration = filters.concentration === 'All concentrations' || (isPerfumeProduct(product) && product.concentration === filters.concentration);
+      const matchesOccasion = filters.occasion === 'Any occasion' || (isPerfumeProduct(product) && product.occasion.includes(filters.occasion));
       return matchesQuery && matchesCategory && matchesFamily && matchesStock && matchesBrand && matchesPrice && matchesConcentration && matchesOccasion;
     });
     if (sort === 'Price: low to high') results.sort((a, b) => a.price - b.price);
@@ -246,6 +246,7 @@ function App() {
   }, [category, filters, query, sort, storefrontProducts]);
 
   const recommendations = useMemo(() => storefrontProducts.filter((product) => {
+    if (!isPerfumeProduct(product)) return false;
     const categoryMatch = !answers.category || getFragranceCategories(product).some((item) => item === answers.category);
     const familyMatch = !answers.family || product.family.toLowerCase().includes(answers.family.toLowerCase()) ||
       product.notes.some((note) => note.toLowerCase().includes(answers.family.toLowerCase()));
@@ -537,9 +538,9 @@ function App() {
           <div className="drawer-top"><div><div className="eyebrow">REFINE YOUR SEARCH</div><h2>Filters</h2></div><button className="icon-button" onClick={() => setPanel(null)} aria-label="Close filters"><X size={20} /></button></div>
           <label className="form-label">Brand<select value={filters.brand} onChange={(e) => setFilters((state) => ({ ...state, brand: e.target.value }))}><option>All brands</option>{[...new Set(storefrontProducts.map((product) => product.brand))].map((brand) => <option key={brand}>{brand}</option>)}</select></label>
           <label className="form-label">Maximum price<select value={filters.price} onChange={(e) => setFilters((state) => ({ ...state, price: e.target.value }))}><option>Any price</option>{['1500', '2000', '3000', '3500'].map((price) => <option key={price} value={price}>Up to {money(Number(price))}</option>)}</select></label>
-          <label className="form-label">Fragrance family<select value={filters.family} onChange={(e) => setFilters((state) => ({ ...state, family: e.target.value }))}><option>All families</option>{[...new Set(storefrontProducts.map((product) => product.family))].map((family) => <option key={family}>{family}</option>)}</select></label>
-          <label className="form-label">Concentration<select value={filters.concentration} onChange={(e) => setFilters((state) => ({ ...state, concentration: e.target.value }))}><option>All concentrations</option>{[...new Set(storefrontProducts.map((product) => product.concentration))].map((concentration) => <option key={concentration}>{concentration}</option>)}</select></label>
-          <label className="form-label">Occasion<select value={filters.occasion} onChange={(e) => setFilters((state) => ({ ...state, occasion: e.target.value }))}><option>Any occasion</option>{[...new Set(storefrontProducts.flatMap((product) => product.occasion))].map((occasion) => <option key={occasion}>{occasion}</option>)}</select></label>
+          <label className="form-label">Fragrance family<select value={filters.family} onChange={(e) => setFilters((state) => ({ ...state, family: e.target.value }))}><option>All families</option>{[...new Set(storefrontProducts.filter(isPerfumeProduct).map((product) => product.family))].map((family) => <option key={family}>{family}</option>)}</select></label>
+          <label className="form-label">Concentration<select value={filters.concentration} onChange={(e) => setFilters((state) => ({ ...state, concentration: e.target.value }))}><option>All concentrations</option>{[...new Set(storefrontProducts.filter(isPerfumeProduct).map((product) => product.concentration))].map((concentration) => <option key={concentration}>{concentration}</option>)}</select></label>
+          <label className="form-label">Occasion<select value={filters.occasion} onChange={(e) => setFilters((state) => ({ ...state, occasion: e.target.value }))}><option>Any occasion</option>{[...new Set(storefrontProducts.filter(isPerfumeProduct).flatMap((product) => product.occasion))].map((occasion) => <option key={occasion}>{occasion}</option>)}</select></label>
           <label className="form-label">Availability<select value={filters.availability} onChange={(e) => setFilters((state) => ({ ...state, availability: e.target.value }))}><option>Any availability</option><option>In stock only</option></select></label>
           <div className="filter-drawer-actions"><button className="text-button" onClick={() => { setFilters({ family: 'All families', availability: 'Any availability', brand: 'All brands', price: 'Any price', concentration: 'All concentrations', occasion: 'Any occasion' }); setCategory('All'); }}>Clear all</button><button className="primary-button" onClick={() => setPanel(null)}>Show {filteredProducts.length} results</button></div>
         </aside>}
@@ -785,7 +786,7 @@ function ProductCard({ product, saved, onOpen, onSave, onAdd, priority = false }
       <button className={`wishlist-toggle ${saved ? 'saved' : ''}`} onClick={onSave} aria-label={saved ? `Remove ${product.name} from wishlist` : `Save ${product.name} to wishlist`}><Heart size={17} fill={saved ? 'currentColor' : 'none'} /></button>
       <button className="quick-add" onClick={onAdd} disabled={product.stock <= 0}>{product.stock > 0 ? <><Plus size={15} /><span>Add</span></> : 'Sold out'}</button>
     </div>
-    <button className="product-copy" onClick={onOpen}><span className="product-brand">{product.brand}</span><span className="product-name">{product.name}</span><span className="product-price">{money(product.price)}{product.originalPrice !== undefined && <del>{money(product.originalPrice)}</del>}</span><span className="product-category-label">{getFragranceCategories(product).join(' · ')}</span></button>
+    <button className="product-copy" onClick={onOpen}><span className="product-brand">{product.brand}</span><span className="product-name">{product.name}</span><span className="product-price">{money(product.price)}{product.originalPrice !== undefined && <del>{money(product.originalPrice)}</del>}</span><span className="product-category-label">{isPerfumeProduct(product) ? getFragranceCategories(product).join(' · ') : `${getProductType(product)} · ${getFragranceCategories(product).join(' · ')}`}</span></button>
   </article>;
 }
 
@@ -991,10 +992,12 @@ function ProductDetail({ product, saved, onSave, onAdd, onClose }: { product: Fr
   return <aside className="drawer right-drawer detail-drawer" role="dialog" aria-modal="true" aria-label={`${product.name} product details`}>
     <div className="drawer-top detail-top"><button className="text-button" onClick={onClose}><ArrowLeft size={16} /> Back to collection</button><button className="icon-button" onClick={onClose} aria-label="Close product details"><X size={20} /></button></div>
     <div className="detail-image"><img src={product.image} alt={`${product.name} by ${product.brand}`} /><button className={`wishlist-toggle detail-heart ${saved ? 'saved' : ''}`} onClick={onSave} aria-label={saved ? 'Remove from wishlist' : 'Save to wishlist'}><Heart size={19} fill={saved ? 'currentColor' : 'none'} /></button></div>
-    <div className="detail-copy"><span className="eyebrow">{product.isOnSale ? 'SALE · ' : ''}{product.brand.toUpperCase()}</span><h2>{product.name}</h2><div className="detail-price">{money(product.price)}{product.originalPrice !== undefined && <del>{money(product.originalPrice)}</del>} <span>{product.concentration}</span></div><p className="detail-description">{product.description}</p>
+    <div className="detail-copy"><span className="eyebrow">{product.isOnSale ? 'SALE · ' : ''}{product.brand.toUpperCase()}</span><h2>{product.name}</h2><div className="detail-price">{money(product.price)}{product.originalPrice !== undefined && <del>{money(product.originalPrice)}</del>} <span>{isPerfumeProduct(product) ? product.concentration : getProductType(product)}</span></div><p className="detail-description">{product.description}</p>
       <div className="detail-stock">{product.stock > 0 ? <><span className="stock-dot" /> In stock · {product.stock} in this sample inventory</> : 'Currently unavailable'}</div>
       <button className="primary-button full-button detail-add" onClick={onAdd} disabled={product.stock <= 0}>{product.stock > 0 ? 'Add to bag' : 'Sold out'} <ArrowRight size={16} /></button>
-      <div className="detail-facts"><div><span>COLLECTION</span><strong>{getFragranceCategories(product).join(' · ')}</strong></div><div><span>SCENT FAMILY</span><strong>{product.family}</strong></div><div><span>SCENT PROFILE</span><strong>{product.notes.join(' · ')}</strong></div><div><span>OCCASION</span><strong>{product.occasion.join(' · ')}</strong></div><div><span>CONCENTRATION</span><strong>{product.concentration}</strong></div></div>
+      <div className="detail-facts"><div><span>COLLECTION</span><strong>{getFragranceCategories(product).join(' · ')}</strong></div>{isPerfumeProduct(product)
+        ? <><div><span>SCENT FAMILY</span><strong>{product.family}</strong></div><div><span>SCENT PROFILE</span><strong>{product.notes.join(' · ')}</strong></div><div><span>OCCASION</span><strong>{product.occasion.join(' · ')}</strong></div><div><span>CONCENTRATION</span><strong>{product.concentration}</strong></div></>
+        : <div><span>PRODUCT TYPE</span><strong>{getProductType(product)}</strong></div>}</div>
       <p className="sample-note">Sample product information for development preview; confirm product details, authenticity, stock, and fulfilment with the business before purchase.</p>
     </div>
   </aside>;

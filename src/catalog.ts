@@ -2,6 +2,8 @@ export const fragranceCategories = ['Men', 'Women', 'Unisex'] as const;
 export type FragranceCategory = (typeof fragranceCategories)[number];
 export const fragranceFamilies = ['Sweet', 'Fresh', 'Woody', 'Spicy', 'Floral', 'Oud', 'Citrus', 'Vanilla'] as const;
 export type FragranceFamily = (typeof fragranceFamilies)[number];
+export const productTypes = ['Perfume', 'Deodorant', 'Antiperspirant Spray', 'Air Freshener', 'Body Spray', 'Body Splash'] as const;
+export type ProductType = (typeof productTypes)[number];
 
 export type Fragrance = {
   id: string;
@@ -10,6 +12,7 @@ export type Fragrance = {
   price: number;
   category: FragranceCategory;
   categories?: FragranceCategory[];
+  productType?: ProductType;
   family: string;
   families?: string[];
   strength: 'Soft' | 'Moderate' | 'Strong';
@@ -23,6 +26,12 @@ export type Fragrance = {
   isOnSale?: boolean;
   stock: number;
 };
+
+export const getProductType = (product: Pick<Fragrance, 'productType'>): ProductType =>
+  productTypes.includes(product.productType as ProductType) ? product.productType as ProductType : 'Perfume';
+
+export const isPerfumeProduct = (product: Pick<Fragrance, 'productType'>): boolean =>
+  getProductType(product) === 'Perfume';
 
 export const getFragranceCategories = (
   product: Pick<Fragrance, 'category' | 'categories'>,

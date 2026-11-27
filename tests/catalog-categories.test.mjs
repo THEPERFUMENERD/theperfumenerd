@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { getFragranceCategories, getFragranceFamilies, optimizedCloudinaryImage, optimizedProductImage } from '../src/catalog.ts';
+import { getFragranceCategories, getFragranceFamilies, getProductType, isPerfumeProduct, optimizedCloudinaryImage, optimizedProductImage } from '../src/catalog.ts';
 
 test('legacy fragrances retain their single category', () => {
   assert.deepEqual(getFragranceCategories({ category: 'Men' }), ['Men']);
@@ -26,6 +26,14 @@ test('legacy single fragrance families and selected multiple families normalize 
   assert.deepEqual(getFragranceFamilies({ family: 'Woody' }), ['Woody']);
   assert.deepEqual(getFragranceFamilies({ family: 'Sweet, Fresh', families: ['Sweet', 'Fresh', 'Sweet'] }), ['Sweet', 'Fresh']);
   assert.deepEqual(getFragranceFamilies({ family: 'Amber' }), []);
+});
+
+test('legacy products remain perfumes and new product types are returned consistently', () => {
+  assert.equal(getProductType({}), 'Perfume');
+  assert.equal(isPerfumeProduct({}), true);
+  assert.equal(getProductType({ productType: 'Air Freshener' }), 'Air Freshener');
+  assert.equal(isPerfumeProduct({ productType: 'Body Splash' }), false);
+  assert.equal(getProductType({ productType: 'unknown' }), 'Perfume');
 });
 
 test('Cloudinary product images request responsive automatic format and compression', () => {

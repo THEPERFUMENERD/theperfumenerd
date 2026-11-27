@@ -7,7 +7,7 @@ import { httpsCallable } from 'firebase/functions';
 import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { db, functions } from './firebase';
-import { getFragranceCategories, money, type Fragrance } from './catalog';
+import { getFragranceCategories, getProductType, isPerfumeProduct, money, type Fragrance } from './catalog';
 
 type CartLine = { productId: string; quantity: number };
 type HeldSale = { id: string; items: CartLine[]; customerName: string; customerPhone: string; createdAt: number };
@@ -202,7 +202,7 @@ export function PosTerminal({ user, isAdmin, onBack }: {
     return products.filter((product) => {
       const matchesCategory = category === 'All' || getFragranceCategories(product).some((item) => item === category);
       const matchesSearch = !term || [
-        product.name, product.brand, product.concentration, product.id,
+        product.name, product.brand, product.concentration, getProductType(product), product.id,
       ].some((value) => value.toLowerCase().includes(term));
       return matchesCategory && matchesSearch;
     });
@@ -396,7 +396,7 @@ export function PosTerminal({ user, isAdmin, onBack }: {
             const available = Number.isSafeInteger(product.stock) ? product.stock : 0;
             return <button className="pos-product-card" key={product.id} onClick={() => addProduct(product)} disabled={available < 1}>
               <span className="pos-product-image"><img src={product.image} alt="" loading="lazy" /></span>
-              <span className="pos-product-info"><strong>{product.name}</strong><small>{product.brand} · {product.concentration}</small><span className="pos-product-bottom"><b>{money(product.price)}</b><small className={available < 4 ? 'low-stock' : ''}>{available > 0 ? `${available} in stock` : 'Out of stock'}</small></span></span>
+              <span className="pos-product-info"><strong>{product.name}</strong><small>{product.brand} · {isPerfumeProduct(product) ? product.concentration : getProductType(product)}</small><span className="pos-product-bottom"><b>{money(product.price)}</b><small className={available < 4 ? 'low-stock' : ''}>{available > 0 ? `${available} in stock` : 'Out of stock'}</small></span></span>
             </button>;
           })}</div> : <div className="pos-empty">{products.length === 0
             ? 'No live products are available. Add and publish fragrances in the admin product catalogue.'
